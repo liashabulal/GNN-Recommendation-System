@@ -50,6 +50,11 @@ Splits are by time, so every evaluation predicts days the model has not seen:
   training-period history or candidate list; each candidate list is restricted to that
   segment and re-ranked).
 
+- **Comparing models:** use a paired bootstrap (`recsys.evaluation.paired_bootstrap`).
+  It resamples impressions with replacement (1,000 resamples, fixed seed) and reports the
+  difference in AUC and nDCG@10 with a 95% interval, overall and per segment. Only claim
+  an improvement when the interval excludes zero.
+
 Code: `src/recsys/data/splits.py` and `src/recsys/evaluation/`.
 
 ## Layout

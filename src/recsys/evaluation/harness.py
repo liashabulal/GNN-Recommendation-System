@@ -83,27 +83,33 @@ def _summarise(per_imp: pd.DataFrame, segment: str) -> dict:
     return {"segment": segment, "n_impressions": len(per_imp), **per_imp[METRICS].mean().to_dict()}
 
 
-def evaluate(scores: pd.DataFrame, split: EvalSplit, model: str) -> pd.DataFrame:
-    """Evaluate one model's scores on a split. Returns one row per segment."""
+def segment_metrics(scores: pd.DataFrame, split: EvalSplit) -> dict[str, pd.DataFrame]:
+    """Per-impression metrics for each segment, keyed by segment name."""
     scored = attach_scores(candidate_table(split), scores)
 
     full = per_impression_metrics(scored)
     known_imps = set(scored.loc[scored["known_user"], "impression_id"])
     is_known = full["impression_id"].isin(known_imps)
+    return {
+        "all": full,
+        "user=known": full[is_known],
+        "user=new": full[~is_known],
+        "article=seen": per_impression_metrics(scored[scored["seen_news"]]),
+        "article=unseen": per_impression_metrics(scored[~scored["seen_news"]]),
+    }
 
-    known, new = _summarise(full[is_known], "user=known"), _summarise(full[~is_known], "user=new")
-    rows = [
-        _summarise(full, "all"),
-        known,
-        new,
-        _summarise(per_impression_metrics(scored[scored["seen_news"]]), "article=seen"),
-        _summarise(per_impression_metrics(scored[~scored["seen_news"]]), "article=unseen"),
-    ]
+
+def evaluate(scores: pd.DataFrame, split: EvalSplit, model: str) -> pd.DataFrame:
+    """Evaluate one model's scores on a split. Returns one row per segment."""
+    per_segment = segment_metrics(scores, split)
+    rows = [_summarise(per_imp, segment) for segment, per_imp in per_segment.items()]
+    known, new = (next(r for r in rows if r["segment"] == s) for s in ("user=known", "user=new"))
+
     if split.reweight_known_share is not None:
         w = split.reweight_known_share
         rows.append({
             "segment": "test-mix weighted",
-            "n_impressions": len(full),
+            "n_impressions": len(per_segment["all"]),
             **{m: w * known[m] + (1 - w) * new[m] for m in METRICS},
         })
     results = pd.DataFrame(rows)
