@@ -21,6 +21,31 @@ vector database.
 - Not a production serving system. Latency and infrastructure only matter where they
   shape modelling choices.
 
+## Evaluation protocol (news / MIND-small)
+
+Splits are by time, so every evaluation predicts days the model has not seen:
+
+| Split | Source | Dates | Use |
+|---|---|---|---|
+| Training period | MIND train impressions | 9–13 Nov 2019 | fit models and all interaction-derived features |
+| Validation | MIND train impressions | 14 Nov 2019 | tuning and model selection only |
+| Test | MIND dev impressions | 15 Nov 2019 | final reporting only, never for tuning |
+
+- Click counts, known user and article IDs, graph edges, and anything else learned from
+  interactions come from the training period only. At scoring time a model may use what
+  a live system would have: the user's history snapshot and the candidate list, never
+  the labels. MIND histories are fixed snapshots taken before the log window, so they
+  contain no validation- or test-day clicks.
+- Metrics (as in the official MIND scorer): AUC, MRR, nDCG@5 and nDCG@10, computed per
+  impression and averaged. Ties between equal scores are resolved by their exact expected
+  value under random ordering, so candidate order cannot affect results.
+- Segment breakdowns: **known vs new users** (whether the user has an impression in the
+  training period), and **seen vs unseen articles** (whether the article appears in a
+  training-period history or candidate list; each candidate list is restricted to that
+  segment and re-ranked).
+
+Code: `src/recsys/data/splits.py` and `src/recsys/evaluation/`.
+
 ## Layout
 
 ```
