@@ -27,6 +27,9 @@ places must outrank organisation (rule 2). But many companies and universities a
 a type that reaches "building" or "geographical feature" (a chain's outlets, a campus), so
 generic place evidence must rank *below* organisation (rule 4). The broader root
 "work" (Q386724) is deliberately not used: it also covers buildings and stadiums.
+
+After the rules, a short manual override list (configs/entity_type_overrides.csv) fixes
+known misclassifications, mainly online platforms typed as event via "occurrence".
 """
 
 import json
@@ -46,6 +49,7 @@ CACHE_DIR = INTERIM_DIR / "wikidata"
 ENTITY_CACHE = CACHE_DIR / "entities.jsonl"
 TYPE_CACHE = CACHE_DIR / "types.jsonl"
 ENTITY_TYPES_FILE = CACHE_DIR / "entity_types.parquet"
+OVERRIDES_FILE = CONFIGS_DIR / "entity_type_overrides.csv"
 
 COARSE_RULES = [  # (coarse type, root classes), in priority order
     ("person", ["Q5"]),
@@ -116,13 +120,39 @@ def _fetch_batches(ids: list[str], batch_size: int, cache: Path, make_query, par
 
 
 def _entity_query(batch: list[str]) -> str:
+    # Label: English if present, else Wikidata's language-neutral "mul" label. Many items
+    # (e.g. Q16568 Jacksonville, Q1215892 National Hockey League) now carry only a "mul"
+    # label, which the label SERVICE with language "en" does not fall back to.
     values = " ".join(f"wd:{q}" for q in batch)
     return f"""
 SELECT ?item ?itemLabel ?type WHERE {{
   VALUES ?item {{ {values} }}
+  OPTIONAL {{ ?item rdfs:label ?en . FILTER(LANG(?en) = "en") }}
+  OPTIONAL {{ ?item rdfs:label ?mul . FILTER(LANG(?mul) = "mul") }}
+  BIND(COALESCE(?en, ?mul) AS ?itemLabel)
   OPTIONAL {{ ?item wdt:P31 ?type . }}
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
 }}"""
+
+
+def _refetch_missing_labels(cache: Path, cfg: dict) -> None:
+    """One-off repair: re-query entities cached without a label (from the label-service bug).
+
+    Only the label is updated; P31 types are kept. Entities that truly have no English
+    label are marked so they are not re-queried on later runs.
+    """
+    rows = _read_cache(cache)
+    missing = [q for q, r in rows.items() if r["label"] is None and not r.get("label_checked")]
+    if not missing:
+        return
+    print(f"labels: re-querying {len(missing):,} entities cached without a label")
+    for start in range(0, len(missing), cfg["entity_batch_size"]):
+        batch = missing[start : start + cfg["entity_batch_size"]]
+        for r in _parse_entities(batch, sparql(_entity_query(batch), cfg)):
+            rows[r["id"]]["label"] = r["label"]
+            rows[r["id"]]["label_checked"] = True
+        time.sleep(cfg["pause_seconds"])
+    with open(cache, "w") as f:
+        f.writelines(json.dumps(r) + "\n" for r in rows.values())
 
 
 def _parse_entities(batch: list[str], bindings: list[dict]) -> list[dict]:
@@ -145,7 +175,9 @@ def _type_query(batch: list[str]) -> str:
 SELECT ?type ?typeLabel ?root WHERE {{
   VALUES ?type {{ {values} }}
   OPTIONAL {{ VALUES ?root {{ {roots} }} ?type wdt:P279* ?root . }}
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+  OPTIONAL {{ ?type rdfs:label ?en . FILTER(LANG(?en) = "en") }}
+  OPTIONAL {{ ?type rdfs:label ?mul . FILTER(LANG(?mul) = "mul") }}
+  BIND(COALESCE(?en, ?mul) AS ?typeLabel)
 }}"""
 
 
@@ -168,11 +200,25 @@ def coarse_type(p31: list[str], type_roots: dict[str, list[str]]) -> str:
     return "other"
 
 
+def apply_overrides(typed: pd.DataFrame, overrides: pd.DataFrame) -> pd.DataFrame:
+    """Replace coarse_type for listed entities (applied after the hierarchy rules; ADR 005)."""
+    unknown = set(overrides["coarse_type"]) - set(COARSE_TYPES)
+    if unknown:
+        raise ValueError(f"unknown coarse types in overrides: {unknown}")
+    typed = typed.copy()
+    typed["coarse_type_rules"] = typed["coarse_type"]  # keep the rule-based type for auditing
+    mapped = typed["entity_id"].map(overrides.set_index("entity_id")["coarse_type"])
+    typed["coarse_type"] = mapped.fillna(typed["coarse_type"])
+    return typed
+
+
 def enrich(entity_ids: list[str]) -> pd.DataFrame:
     """Fetch (or read from cache) labels and types; return one row per entity."""
     cfg = load_config()
-    entities = _fetch_batches(sorted(set(entity_ids)), cfg["entity_batch_size"], ENTITY_CACHE,
-                              _entity_query, _parse_entities, cfg, "entities")
+    _fetch_batches(sorted(set(entity_ids)), cfg["entity_batch_size"], ENTITY_CACHE,
+                   _entity_query, _parse_entities, cfg, "entities")
+    _refetch_missing_labels(ENTITY_CACHE, cfg)
+    entities = _read_cache(ENTITY_CACHE)
     type_ids = sorted({t for e in entities.values() for t in e["p31"]})
     types = _fetch_batches(type_ids, cfg["type_batch_size"], TYPE_CACHE, _type_query, _parse_types, cfg, "types")
     type_roots = {t: row["roots"] for t, row in types.items()}
@@ -187,6 +233,7 @@ def enrich(entity_ids: list[str]) -> pd.DataFrame:
         }
         for q in sorted(set(entity_ids))
     ])
+    out = apply_overrides(out, pd.read_csv(OVERRIDES_FILE))
     out.to_parquet(ENTITY_TYPES_FILE, index=False)
     return out
 

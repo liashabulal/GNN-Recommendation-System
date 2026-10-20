@@ -47,3 +47,22 @@ def test_entity_type_tables_default_to_other():
     edges = dict(tables["edges_entity_is_type"].itertuples(index=False))
     assert edges == {"Q1": "person", "Q2": "other"}
     assert len(tables["nodes_entity_type"]) == 6
+
+
+def test_overrides_applied_after_rules():
+    from recsys.data.wikidata import apply_overrides
+
+    typed = pd.DataFrame({"entity_id": ["Q918", "Q5"], "coarse_type": ["event", "person"]})
+    overrides = pd.DataFrame({"entity_id": ["Q918"], "coarse_type": ["organisation"]})
+    out = apply_overrides(typed, overrides).set_index("entity_id")
+    assert out.loc["Q918", "coarse_type"] == "organisation"
+    assert out.loc["Q918", "coarse_type_rules"] == "event"  # rule-based type kept for auditing
+    assert out.loc["Q5", "coarse_type"] == "person"
+
+
+def test_overrides_file_is_valid():
+    from recsys.data.wikidata import COARSE_TYPES, OVERRIDES_FILE
+
+    overrides = pd.read_csv(OVERRIDES_FILE)
+    assert overrides["entity_id"].is_unique
+    assert set(overrides["coarse_type"]) <= set(COARSE_TYPES)

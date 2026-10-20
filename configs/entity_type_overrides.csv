@@ -1,0 +1,18 @@
+entity_id,label,coarse_type,reason
+Q918,X (Twitter),organisation,social network typed as event via "occurrence"
+Q209330,Instagram,organisation,social network typed as event via "occurrence"
+Q355,Facebook,organisation,"already organisation; listed explicitly with the other platforms"
+Q866,YouTube,organisation,video platform typed as event via "occurrence"
+Q48938223,TikTok,organisation,video platform typed as event via "occurrence"
+Q54958752,Disney+,organisation,streaming service typed as event via "occurrence"
+Q4740856,Amazon Prime Video,organisation,streaming service typed as event via "occurrence"
+Q689141,Spotify,organisation,streaming service typed as event via "occurrence"
+Q4555537,Twitch,organisation,streaming platform typed as event via "occurrence"
+Q1049511,WhatsApp,organisation,messaging service typed as event via "occurrence"
+Q333618,Snapchat,organisation,social network typed as event via "occurrence"
+Q213660,LinkedIn,organisation,social network typed as event via "occurrence"
+Q255381,Pinterest,organisation,social network typed as event via "occurrence"
+Q12013,Google Maps,organisation,online service typed as event via "occurrence"
+Q483959,PayPal,organisation,online payment service typed as event via "occurrence"
+Q130838,Today,creative work,TV news programme typed as event
+Q43297,Time,creative work,magazine typed as event
