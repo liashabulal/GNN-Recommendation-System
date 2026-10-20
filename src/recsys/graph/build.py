@@ -7,6 +7,7 @@ Article-centred graph with no user nodes (ADR 001):
            article -mentions-> entity        (confidence, source = title/abstract)
            article -coclicked- article       (undirected, weight = number of users)
            ... plus a pruned, normalised co-click set (ADR 004, settings in configs/graph.toml)
+           entity -is-> entity_type          (coarse Wikidata type, if the enrichment cache exists)
 
 Content edges (subcategory, entity) come from article text and metadata, which exist
 as soon as an article is published, so they cover every article in the setup, including
@@ -25,6 +26,7 @@ import pandas as pd
 
 from recsys.data.mind import explode_impressions, load_entity_mentions, load_news
 from recsys.data.splits import EvalSplit, load_split
+from recsys.data.wikidata import COARSE_TYPES, ENTITY_TYPES_FILE
 from recsys.paths import CONFIGS_DIR, PROCESSED_DIR
 
 GRAPH_DIR = PROCESSED_DIR / "graph"
@@ -105,8 +107,11 @@ def prune_coclick_edges(edges: pd.DataFrame, readers: pd.Series, min_users: int,
 
 
 def build_graph(split: EvalSplit, news: pd.DataFrame, mentions: pd.DataFrame,
-                pruning: dict | None = None) -> dict[str, pd.DataFrame]:
-    """All node and edge tables for one setup, keyed by table name."""
+                pruning: dict | None = None, entity_types: pd.DataFrame | None = None) -> dict[str, pd.DataFrame]:
+    """All node and edge tables for one setup, keyed by table name.
+
+    `entity_types` (from recsys.data.wikidata) adds entity-type nodes and edges.
+    """
     pruning = pruning or load_pruning_config()
     clicks = training_clicks(split.train)
     readers = clicks.groupby("news_id")["user_id"].nunique()  # training users per article
@@ -127,7 +132,7 @@ def build_graph(split: EvalSplit, news: pd.DataFrame, mentions: pd.DataFrame,
                 .agg(label=("label", "first"), mind_type=("mind_type", lambda t: t.mode().iloc[0]))
                 .reset_index())
 
-    return {
+    tables = {
         "nodes_article": articles[["news_id", "category", "subcategory_id", "title", "seen_in_training"]]
         .reset_index(drop=True),
         "nodes_subcategory": subcats.reset_index(drop=True),
@@ -140,6 +145,21 @@ def build_graph(split: EvalSplit, news: pd.DataFrame, mentions: pd.DataFrame,
         "edges_article_coclicked_article": raw_coclick,
         "edges_article_coclicked_article_pruned": prune_coclick_edges(raw_coclick, readers, **pruning),
     }
+    if entity_types is not None:
+        tables.update(entity_type_tables(tables["nodes_entity"], entity_types))
+    return tables
+
+
+def entity_type_tables(entities: pd.DataFrame, entity_types: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Wikidata label on entity nodes, plus entity-type nodes and entity-is-type edges."""
+    typed = entities.merge(entity_types[["entity_id", "wikidata_label", "coarse_type"]],
+                           on="entity_id", how="left", validate="one_to_one")
+    typed["coarse_type"] = typed["coarse_type"].fillna("other")
+    return {
+        "nodes_entity": typed.drop(columns="coarse_type"),
+        "nodes_entity_type": pd.DataFrame({"entity_type": COARSE_TYPES}),
+        "edges_entity_is_type": typed[["entity_id", "coarse_type"]].rename(columns={"coarse_type": "entity_type"}),
+    }
 
 
 def load_graph(setup: str) -> dict[str, pd.DataFrame]:
@@ -151,8 +171,12 @@ def main() -> None:
     mentions = pd.concat([load_entity_mentions("train"), load_entity_mentions("dev")])
     mentions = mentions.drop_duplicates(["news_id", "entity_id", "source"])
 
+    entity_types = pd.read_parquet(ENTITY_TYPES_FILE) if ENTITY_TYPES_FILE.exists() else None
+    if entity_types is None:
+        print("No Wikidata cache found: building without entity types (run recsys.data.wikidata)")
+
     for setup in ("validation", "test"):
-        tables = build_graph(load_split(setup), news, mentions)
+        tables = build_graph(load_split(setup), news, mentions, entity_types=entity_types)
         out = GRAPH_DIR / setup
         out.mkdir(parents=True, exist_ok=True)
         for name, df in tables.items():
