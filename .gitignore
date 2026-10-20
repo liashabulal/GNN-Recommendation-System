@@ -1,0 +1,23 @@
+# --- Data: never committed (large, licensed). Keep the folder skeleton only. ---
+data/raw/*
+data/interim/*
+data/processed/*
+!data/*/.gitkeep
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- OS / editors ---
+.DS_Store
+.vscode/
+.idea/
