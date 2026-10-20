@@ -1,0 +1,18 @@
+# Local Neo4j for graph exploration (Part C). Start Colima first: `colima start --memory 4`.
+services:
+  neo4j:
+    image: neo4j:5.26-community   # 5.x LTS
+    container_name: recsys-neo4j
+    ports:
+      - "127.0.0.1:7474:7474"     # browser UI, localhost only
+      - "127.0.0.1:7687:7687"     # Bolt (Python driver)
+    environment:
+      # Local development credentials; override with NEO4J_PASSWORD in your shell or a .env file.
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-recsys-local-dev}
+      NEO4J_server_memory_heap_initial__size: 1G
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 512M
+    volumes:
+      - neo4j-data:/data
+volumes:
+  neo4j-data:

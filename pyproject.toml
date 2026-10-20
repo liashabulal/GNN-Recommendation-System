@@ -9,6 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "jupyter>=1.1.1",
     "matplotlib>=3.11.2",
+    "neo4j>=6.4.1",
     "numpy>=2.4.6",
     "pandas>=3.0.6",
     "pyarrow>=26.0.0",

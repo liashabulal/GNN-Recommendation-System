@@ -57,6 +57,31 @@ Splits are by time, so every evaluation predicts days the model has not seen:
 
 Code: `src/recsys/data/splits.py` and `src/recsys/evaluation/`.
 
+## News graph
+
+```bash
+uv run python -m recsys.data.wikidata      # Wikidata labels/types (cached in data/interim/; runs once)
+uv run python -m recsys.graph.build        # parquet graph tables for both setups -> data/processed/graph/
+uv run python -m recsys.graph.report       # reports/graph_stats.md
+```
+
+Design decisions are recorded in `docs/decisions/` (ADRs 001–005).
+
+### Neo4j (optional, for exploration)
+
+Neo4j 5 Community runs in Docker via [Colima](https://github.com/abiosoft/colima).
+**Colima does not start automatically after a reboot**, so start it first:
+
+```bash
+colima start --memory 4                    # Neo4j needs more than Colima's 2 GB default
+docker compose up -d                       # Neo4j on localhost:7474 (browser) and :7687 (Bolt)
+uv run python -m recsys.graph.neo4j_load   # wipe and load the test setup (pruned co-click edges only)
+```
+
+Default local credentials are `neo4j` / `recsys-local-dev`; override with `NEO4J_PASSWORD`.
+Then open `notebooks/03_graph_exploration.ipynb`. See `docs/rdf_vs_property_graph.md` for
+why both Wikidata (RDF) and Neo4j (property graph) are used.
+
 ## Layout
 
 ```
