@@ -3,8 +3,7 @@
 endpoint = "https://query.wikidata.org/sparql"
 # Wikimedia asks for a descriptive User-Agent with a way to reach you. Add a contact
 # (URL or email) here if you want one; nothing personal is sent by default.
-# TODO: add your GitHub repo URL inside the parentheses, e.g. "(https://github.com/<user>/<repo>; ...)".
-user_agent = "recsys-news-graph/0.1 (personal research project; batch SPARQL enrichment of MIND entities)"
+user_agent = "recsys-news-graph/0.1 (https://github.com/liashabulal/GNN-Recommendation-System; batch SPARQL enrichment of MIND entities)"
 
 entity_batch_size = 200      # entities per query (label + P31)
 type_batch_size = 50         # P31 type IDs per query (P279* classification)
