@@ -1,5 +1,7 @@
 """Harness tests on a tiny hand-built split."""
 
+import dataclasses
+
 import pandas as pd
 import pytest
 
@@ -50,6 +52,18 @@ def test_segments(split):
     assert res.loc["article=unseen", "auc"] == 1.0
 
     assert set(res["model"]) == {"toy"} and set(res["split"]) == {"toy"}
+
+
+def test_test_mix_weighted_row(split):
+    scores = _scores([
+        (10, "A", 3.0), (10, "X", 2.0), (10, "B", 1.0),  # known user: MRR 1
+        (11, "B", 3.0), (11, "Y", 2.0), (11, "X", 1.0),  # new user:   MRR 1/2
+    ])
+    assert "test-mix weighted" not in set(evaluate(scores, split, model="toy")["segment"])
+
+    reweighted = dataclasses.replace(split, reweight_known_share=0.25)
+    res = evaluate(scores, reweighted, model="toy").set_index("segment")
+    assert res.loc["test-mix weighted", "mrr"] == pytest.approx(0.25 * 1 + 0.75 * 0.5)
 
 
 def test_missing_score_raises(split):

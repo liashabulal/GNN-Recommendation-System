@@ -11,6 +11,10 @@ Segments
                      each impression's candidate list is restricted to articles that were /
                      were not seen in the training period, then ranked among themselves.
                      Impressions left with no click in that sub-list are dropped.
+    test-mix weighted
+                     only when the split sets `reweight_known_share` (validation): the
+                     user=known and user=new scores averaged with weights w and 1 - w, so the
+                     user mix matches the test split. This is the primary tuning metric.
 
 All metrics are computed per impression and then averaged. AUC is additionally
 undefined when a (sub-)list has no non-clicked article; such impressions are left out
@@ -87,13 +91,21 @@ def evaluate(scores: pd.DataFrame, split: EvalSplit, model: str) -> pd.DataFrame
     known_imps = set(scored.loc[scored["known_user"], "impression_id"])
     is_known = full["impression_id"].isin(known_imps)
 
+    known, new = _summarise(full[is_known], "user=known"), _summarise(full[~is_known], "user=new")
     rows = [
         _summarise(full, "all"),
-        _summarise(full[is_known], "user=known"),
-        _summarise(full[~is_known], "user=new"),
+        known,
+        new,
         _summarise(per_impression_metrics(scored[scored["seen_news"]]), "article=seen"),
         _summarise(per_impression_metrics(scored[~scored["seen_news"]]), "article=unseen"),
     ]
+    if split.reweight_known_share is not None:
+        w = split.reweight_known_share
+        rows.append({
+            "segment": "test-mix weighted",
+            "n_impressions": len(full),
+            **{m: w * known[m] + (1 - w) * new[m] for m in METRICS},
+        })
     results = pd.DataFrame(rows)
     results.insert(0, "split", split.name)
     results.insert(0, "model", model)
