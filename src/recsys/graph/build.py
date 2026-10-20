@@ -6,6 +6,7 @@ Article-centred graph with no user nodes (ADR 001):
     edges  article -in-> subcategory -in-> category
            article -mentions-> entity        (confidence, source = title/abstract)
            article -coclicked- article       (undirected, weight = number of users)
+           ... plus a pruned, normalised co-click set (ADR 004, settings in configs/graph.toml)
 
 Content edges (subcategory, entity) come from article text and metadata, which exist
 as soon as an article is published, so they cover every article in the setup, including
@@ -17,12 +18,14 @@ the histories of target-only users, are never used for co-click edges.
 Run `uv run python -m recsys.graph.build` to write both setups to data/processed/graph/.
 """
 
+import tomllib
+
 import numpy as np
 import pandas as pd
 
 from recsys.data.mind import explode_impressions, load_entity_mentions, load_news
 from recsys.data.splits import EvalSplit, load_split
-from recsys.paths import PROCESSED_DIR
+from recsys.paths import CONFIGS_DIR, PROCESSED_DIR
 
 GRAPH_DIR = PROCESSED_DIR / "graph"
 
@@ -74,8 +77,41 @@ def coclick_edges(clicks: pd.DataFrame) -> pd.DataFrame:
     })
 
 
-def build_graph(split: EvalSplit, news: pd.DataFrame, mentions: pd.DataFrame) -> dict[str, pd.DataFrame]:
+def load_pruning_config() -> dict:
+    with open(CONFIGS_DIR / "graph.toml", "rb") as f:
+        return tomllib.load(f)["coclick_pruning"]
+
+
+def prune_coclick_edges(edges: pd.DataFrame, readers: pd.Series, min_users: int, top_k: int) -> pd.DataFrame:
+    """Pruned, normalised co-click edges (ADR 004).
+
+    1. Keep edges shared by at least `min_users` users.
+    2. norm_weight = weight / sqrt(readers_src * readers_dst): a cosine between the two
+       articles' reader sets, so popular articles stop dominating every neighbourhood.
+    3. Keep an edge if it is among the `top_k` highest norm_weight edges of either endpoint.
+    """
+    e = edges[edges["weight"] >= min_users].copy()
+    e["norm_weight"] = e["weight"] / np.sqrt(e["src"].map(readers).to_numpy() * e["dst"].map(readers).to_numpy())
+
+    # Look at each edge from both endpoints and rank neighbours per article.
+    both = pd.concat([
+        e.assign(article=e["src"], edge=np.arange(len(e))),
+        e.assign(article=e["dst"], edge=np.arange(len(e))),
+    ])
+    # Deterministic ties: higher raw weight first, then edge order.
+    both = both.sort_values(["article", "norm_weight", "weight", "edge"], ascending=[True, False, False, True])
+    keep = both.loc[both.groupby("article").cumcount() < top_k, "edge"].unique()
+    return e.iloc[np.sort(keep)].reset_index(drop=True)
+
+
+def build_graph(split: EvalSplit, news: pd.DataFrame, mentions: pd.DataFrame,
+                pruning: dict | None = None) -> dict[str, pd.DataFrame]:
     """All node and edge tables for one setup, keyed by table name."""
+    pruning = pruning or load_pruning_config()
+    clicks = training_clicks(split.train)
+    readers = clicks.groupby("news_id")["user_id"].nunique()  # training users per article
+    raw_coclick = coclick_edges(clicks)
+
     seen = split.seen_news
     in_setup = seen | set(split.target["history"].explode().dropna()) | set(split.target["candidates"].explode())
 
@@ -101,7 +137,8 @@ def build_graph(split: EvalSplit, news: pd.DataFrame, mentions: pd.DataFrame) ->
         "edges_subcategory_in_category": subcats[["subcategory_id", "category"]].reset_index(drop=True),
         "edges_article_mentions_entity": article_mentions[["news_id", "entity_id", "source", "confidence"]]
         .reset_index(drop=True),
-        "edges_article_coclicked_article": coclick_edges(training_clicks(split.train)),
+        "edges_article_coclicked_article": raw_coclick,
+        "edges_article_coclicked_article_pruned": prune_coclick_edges(raw_coclick, readers, **pruning),
     }
 
 

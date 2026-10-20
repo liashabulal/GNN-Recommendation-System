@@ -1,0 +1,5 @@
+# Graph construction settings (read by recsys.graph.build). See docs/decisions/004.
+
+[coclick_pruning]
+min_users = 2   # drop co-click edges shared by fewer users than this
+top_k = 20      # keep an edge if it is in the top k (by normalised weight) of either article

@@ -30,3 +30,6 @@ under both `news` and `video`).
   feature only, (c) neither. Report the difference with the paired bootstrap, with
   particular attention to the unseen-article segment. Revisit this decision if (b) is not
   significantly worse.
+- **Judge the ablation on the unseen-article segment.** 293 unseen test articles have no
+  co-click and no entity edges, so they are linked to the graph *only* through their
+  subcategory. Overall metrics would hide the effect on them.

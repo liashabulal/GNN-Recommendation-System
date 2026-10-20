@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from recsys.data.splits import EvalSplit
-from recsys.graph.build import build_graph, coclick_edges
+from recsys.graph.build import build_graph, coclick_edges, prune_coclick_edges
 
 COLUMNS = ["impression_id", "user_id", "time", "history", "candidates", "labels"]
 TRAIN_DAY, TARGET_DAY = pd.Timestamp("2019-11-09"), pd.Timestamp("2019-11-14")
@@ -26,7 +26,8 @@ def tables():
     news = pd.DataFrame({"news_id": ids, "category": "news", "subcategory": "newsus", "title": ids})
     mentions = pd.DataFrame({"news_id": ["X"], "entity_id": ["Q1"], "label": ["E"], "mind_type": ["P"],
                              "confidence": [1.0], "source": ["title"]})
-    return build_graph(EvalSplit(name="toy", train=train, target=target), news, mentions)
+    return build_graph(EvalSplit(name="toy", train=train, target=target), news, mentions,
+                       pruning={"min_users": 1, "top_k": 20})
 
 
 def _pairs(edges):
@@ -54,6 +55,20 @@ def test_unseen_articles_still_get_content_edges(tables):
     assert not articles.loc["X", "seen_in_training"]
     assert "X" in set(tables["edges_article_in_subcategory"]["news_id"])
     assert "X" in set(tables["edges_article_mentions_entity"]["news_id"])
+
+
+def test_pruning_min_users_normalisation_and_top_k():
+    edges = pd.DataFrame({
+        "src": ["A", "A", "A", "B"],
+        "dst": ["B", "C", "D", "C"],
+        "weight": [4, 2, 1, 3],
+    })
+    readers = pd.Series({"A": 4, "B": 4, "C": 9, "D": 1})
+    pruned = prune_coclick_edges(edges, readers, min_users=2, top_k=1)
+    norm = {(s, d): w for s, d, w in pruned[["src", "dst", "norm_weight"]].itertuples(index=False)}
+    # A-D dropped (1 user). A-B = 4/sqrt(16) = 1.0 is top-1 for A and B.
+    # A-C = 2/6 and B-C = 3/6: C's top-1 is B-C, so B-C is kept via C; A-C is nobody's top-1.
+    assert norm == {("A", "B"): pytest.approx(1.0), ("B", "C"): pytest.approx(0.5)}
 
 
 def test_coclick_weight_counts_users_not_clicks():
