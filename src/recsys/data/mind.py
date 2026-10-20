@@ -84,6 +84,33 @@ def load_news(split: str) -> pd.DataFrame:
     return df
 
 
+def load_entity_mentions(split: str) -> pd.DataFrame:
+    """One row per (article, entity, source) from news.tsv's full entity records.
+
+    Columns: news_id, entity_id (Wikidata ID), label, mind_type (MIND's one-letter type
+    code), confidence, source ("title" or "abstract").
+    """
+    raw = pd.read_csv(
+        mind_split_dir(split) / "news.tsv",
+        sep="\t",
+        header=None,
+        names=NEWS_COLUMNS,
+        quoting=3,
+        usecols=["news_id", "title_entities", "abstract_entities"],
+        dtype="string",
+    )
+    rows = []
+    for source in ("title", "abstract"):
+        for news_id, cell in zip(raw["news_id"], raw[f"{source}_entities"]):
+            if isinstance(cell, str) and cell:
+                rows += [
+                    (news_id, e["WikidataId"], e["Label"], e["Type"], float(e["Confidence"]), source)
+                    for e in json.loads(cell)
+                ]
+    mentions = pd.DataFrame(rows, columns=["news_id", "entity_id", "label", "mind_type", "confidence", "source"])
+    return mentions.drop_duplicates(["news_id", "entity_id", "source"]).reset_index(drop=True)
+
+
 def explode_impressions(behaviors: pd.DataFrame) -> pd.DataFrame:
     """One row per (impression, candidate article) with its click label."""
     return (
