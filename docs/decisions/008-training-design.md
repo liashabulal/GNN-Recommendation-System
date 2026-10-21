@@ -64,6 +64,26 @@ useful gradients. The loss therefore uses `exp(s) · score` with a **learnable l
 
 **Seeds.** Each final configuration is trained with **3 seeds**.
 
+**Determinism.** `pyg-lib`'s neighbour sampler is not fully deterministic under a fixed seed,
+so two seed-0 runs are not bit-identical. On validation they differ by **about 0.001 AUC per
+epoch** (e.g. 0.6221 vs 0.6231 after epoch 1), below the bootstrap interval widths (±0.002 to
+±0.008 depending on segment). Run-to-run noise at this level doesn't change any conclusion,
+but results are reproducible to about 0.001 AUC, not exactly.
+
+**Outcome of the scoring-graph prediction (validation, seed 0).** The prediction that the
+rebuilt scoring graph would help was **not supported on the first run**. Scoring 14 Nov with
+the older 9–11 Nov training graph was as good overall, and slightly better on seen articles
+(rebuilt − training graph: −0.003 AUC, 95% CI excluding zero).
+- **Likely reason:** the model was trained on a sparser graph (9–11 Nov, 186k pruned co-click
+  edges) than the one it was scored with (9–13 Nov, 218k). The rebuilt graph's denser
+  neighbourhoods are therefore partly out of distribution for the trained weights.
+- **Decision rule applied after the 20-epoch rerun:** switch to the training graph only if its
+  advantage on the test-mix weighted AUC has a 95% interval excluding zero. Its advantage was
+  **−0.0004 (95% CI −0.0027 to +0.0018)**, so **the rebuilt scoring graph is kept** as
+  pre-registered.
+- **Worth revisiting:** training on graphs of the same density as the scoring graph (e.g.
+  rolling graph windows of equal length).
+
 ## Alternatives considered
 
 - **One period for both graph and examples:** this is ablation A6, expected to look better in

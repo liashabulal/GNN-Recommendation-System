@@ -24,5 +24,5 @@ negatives = 4            # non-clicked articles from the same impression per cli
 batch_size = 256         # clicks per step
 lr = 0.001
 weight_decay = 1e-5      # starting value, tuned on validation
-max_epochs = 10
+max_epochs = 20
 patience = 2             # epochs without test-mix weighted validation AUC improvement
