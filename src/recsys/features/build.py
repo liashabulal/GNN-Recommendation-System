@@ -8,7 +8,9 @@ Outputs in data/processed/features/ (see ADR 006):
     entity_ids.parquet     row order + `missing` flag (1 = no MIND vector)
     <setup>/subcategory_text.npy, subcategory_ids.parquet
     <setup>/category_text.npy,    category_ids.parquet
-                           mean article text embedding over the setup's articles
+                           mean article text embedding over the setup's articles that exist
+                           before the target day (falls back to target-day articles only
+                           for a group that has none; see ADR 006)
     metadata.json          encoder name, versions, shapes
 
 Article and entity features are content-only, so one file serves both setups.
@@ -77,6 +79,32 @@ def group_mean(article_emb: pd.DataFrame, keys: pd.Series) -> pd.DataFrame:
     return article_emb.groupby(keys.to_numpy()).mean()
 
 
+def pre_target_group_mean(article_emb: pd.DataFrame, keys: pd.Series, pre_target: pd.Series) -> pd.DataFrame:
+    """Group mean over articles that exist before the target day.
+
+    A group with no such article falls back to the mean of its target-day articles, so
+    every group still gets a vector (e.g. a subcategory that is new on the target day).
+    """
+    means = group_mean(article_emb[pre_target.to_numpy()], keys[pre_target.to_numpy()])
+    fallback = group_mean(article_emb, keys)
+    missing = fallback.index.difference(means.index)
+    return pd.concat([means, fallback.loc[missing]]).loc[fallback.index]
+
+
+def pre_target_articles(setup: str, article_ids: pd.Index) -> pd.Series:
+    """True for articles that exist before the setup's target day.
+
+    That is: articles seen in the training period, or in any target user's history snapshot
+    (taken before the log window). False only for articles that appear solely as target-day
+    candidates, which may postdate some impressions.
+    """
+    from recsys.data.splits import load_split
+
+    split = load_split(setup)
+    known = split.seen_news | set(split.target["history"].explode().dropna())
+    return pd.Series(article_ids.isin(known), index=article_ids)
+
+
 def main() -> None:
     from recsys.experiments.run_baselines import load_catalogue
 
@@ -104,13 +132,15 @@ def main() -> None:
     for setup in SETUPS:
         nodes = load_graph(setup)["nodes_article"].set_index("news_id")
         setup_emb = article_emb.loc[nodes.index]
+        pre_target = pre_target_articles(setup, nodes.index)
         out = FEATURES_DIR / setup
         out.mkdir(exist_ok=True)
         for name, keys in (("subcategory", nodes["subcategory_id"]), ("category", nodes["category"])):
-            means = group_mean(setup_emb, keys)
+            means = pre_target_group_mean(setup_emb, keys, pre_target)
             np.save(out / f"{name}_text.npy", means.to_numpy(dtype=np.float32))
             pd.DataFrame({f"{name}_id": means.index}).to_parquet(out / f"{name}_ids.parquet", index=False)
-            print(f"{setup} {name}_text: {means.shape}")
+            n_fallback = len(set(keys) - set(keys[pre_target.to_numpy()]))
+            print(f"{setup} {name}_text: {means.shape}, fallback to target-day articles: {n_fallback}")
 
     import sentence_transformers
     (FEATURES_DIR / "metadata.json").write_text(json.dumps({

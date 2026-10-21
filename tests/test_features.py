@@ -25,3 +25,15 @@ def test_article_texts_join_title_and_abstract_and_tolerate_missing_abstract():
     news = pd.DataFrame({"news_id": ["A", "B"], "title": ["Title A", "Title B"], "abstract": ["Abstract A", pd.NA]})
     texts = article_texts(pd.DataFrame({"news_id": ["B", "A"]}), news)
     assert texts == ["Title B", "Title A Abstract A"]
+
+
+def test_pre_target_group_mean_excludes_target_day_and_falls_back():
+    from recsys.features.build import pre_target_group_mean
+
+    emb = pd.DataFrame([[1.0, 0.0], [9.0, 9.0], [0.0, 4.0]], index=["A", "T", "N"])
+    keys = pd.Series(["s1", "s1", "s_new"], index=emb.index)
+    pre_target = pd.Series([True, False, False], index=emb.index)  # T and N are target-day only
+    means = pre_target_group_mean(emb, keys, pre_target)
+    assert means.loc["s1"].tolist() == [1.0, 0.0]      # target-day article T excluded
+    assert means.loc["s_new"].tolist() == [0.0, 4.0]   # no pre-target article: fallback
+    assert list(means.index) == ["s1", "s_new"]
