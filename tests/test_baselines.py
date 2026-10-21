@@ -53,3 +53,20 @@ def test_tfidf_scores_are_cosine_to_history_profile():
     assert 0 < scores[(10, "B")] < 1
     # U3 has an empty history: every candidate ties at 0.
     assert scores[(11, "C")] == scores[(11, "D")] == 0
+
+
+def test_embedding_baseline_cosine_and_empty_history(monkeypatch, tmp_path):
+    import numpy as np
+
+    import recsys.features.build as fb
+    from recsys.models.baselines import EmbeddingContent
+
+    # Tiny frozen embeddings: A and B point the same way, C is orthogonal.
+    np.save(tmp_path / "article_text.npy", np.array([[1, 0], [1, 0], [0, 1], [0.6, 0.8]], dtype=np.float32))
+    pd.DataFrame({"news_id": ["A", "B", "C", "D"]}).to_parquet(tmp_path / "article_ids.parquet")
+    monkeypatch.setattr(fb, "FEATURES_DIR", tmp_path)
+
+    scores = _by_pair(EmbeddingContent().fit(TRAIN, NEWS).score(TARGET))
+    assert scores[(10, "A")] == pytest.approx(1.0)  # U1 history [A] (+ training click A)
+    assert scores[(10, "C")] == pytest.approx(0.0)
+    assert scores[(11, "C")] == scores[(11, "D")] == 0  # U3: empty history, no clicks

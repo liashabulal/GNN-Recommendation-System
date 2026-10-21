@@ -39,8 +39,15 @@ impressions it learns from:
   (ADR 004), the 1 / log(1 + degree) entity weights, and the subcategory/category means
   (ADR 006: articles that exist before the period's end).
 - **User histories** for training examples follow ADR 007. They use the history snapshot plus
-  clicks before the impression time, within the training-example period. The history snapshot
-  predates 9 Nov, so it is safe for every period.
+  all clicks from 9 Nov (graph period and earlier example-period impressions) made strictly
+  before the impression time, which is the same rule the scoring side uses. The history
+  snapshot predates 9 Nov, so it is safe for every period.
+
+**Temperature.** Article vectors have unit length and user vectors are means of them, so
+dot-product scores stay within about ±1. That range is too narrow for a 5-way softmax to give
+useful gradients. The loss therefore uses `exp(s) · score` with a **learnable log-scale `s`**
+(initialised at log 10). Every score is multiplied by the same positive number, so
+**rankings, and therefore all evaluation metrics, are unchanged**; only the training signal is.
 
 **Optimisation.**
 - Adam, learning rate 0.001.

@@ -14,6 +14,15 @@ entity_type_dim = 64     # learnable embedding per coarse entity type
 hidden_dim = 128
 num_layers = 2
 fanout = [10, 5]         # max sampled neighbours per edge type, layer 1 and layer 2
+dropout = 0.2           # starting value, tuned on validation (ADR 008)
 
 [user]
 max_history = 50         # most recent history articles (last items of the history column)
+
+[train]                  # ADR 008
+negatives = 4            # non-clicked articles from the same impression per click
+batch_size = 256         # clicks per step
+lr = 0.001
+weight_decay = 1e-5      # starting value, tuned on validation
+max_epochs = 10
+patience = 2             # epochs without test-mix weighted validation AUC improvement

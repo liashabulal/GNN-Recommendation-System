@@ -124,3 +124,43 @@ class TfidfContent:
             in_chunk = (user_pos >= start) & (user_pos < start + user_chunk)
             scores[in_chunk] = sims[user_pos[in_chunk] - start, cand_pos[in_chunk]]
         return pairs[["impression_id", "news_id"]].assign(score=scores)
+
+
+class EmbeddingContent:
+    """Frozen sentence embeddings, no graph (ADR 009's "embedding baseline").
+
+    - Article vector: the frozen MiniLM text embedding (ADR 006), unit length.
+    - User vector: mean of the user's history article embeddings, using the same history
+      rule as the GNN (ADR 007): last 50 of the history column + training-period clicks
+      before the impression time, each article once.
+    - Score: cosine(user vector, article vector). Empty history -> all candidates tie.
+    """
+
+    name = "embedding"
+
+    def __init__(self, max_history: int = 50):
+        self.max_history = max_history
+
+    def fit(self, train: pd.DataFrame, news: pd.DataFrame) -> "EmbeddingContent":
+        from recsys.features.build import FEATURES_DIR
+
+        self.train_ = train  # only its clicks are used, to extend histories
+        self.vectors_ = np.load(FEATURES_DIR / "article_text.npy")
+        self.row_of_ = pd.Series(np.arange(len(self.vectors_)),
+                                 index=pd.read_parquet(FEATURES_DIR / "article_ids.parquet")["news_id"])
+        return self
+
+    def score(self, target: pd.DataFrame) -> pd.DataFrame:
+        from recsys.models.history import history_tensor, impression_histories
+
+        histories = impression_histories(target, self.train_, self.max_history)
+        idx = history_tensor(histories, self.row_of_, self.max_history).numpy()
+        mask = idx >= 0
+        users = (self.vectors_[np.maximum(idx, 0)] * mask[..., None]).sum(axis=1)
+        users = normalize(users)  # zero rows (empty history) stay zero
+        user_row = pd.Series(np.arange(len(histories)), index=histories.index)
+
+        pairs = _candidate_pairs(target)
+        u = users[user_row.loc[pairs["impression_id"]].to_numpy()]
+        a = self.vectors_[self.row_of_.loc[pairs["news_id"]].to_numpy()]
+        return pairs[["impression_id", "news_id"]].assign(score=(u * a).sum(axis=1))

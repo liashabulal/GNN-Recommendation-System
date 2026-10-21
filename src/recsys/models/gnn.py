@@ -79,8 +79,9 @@ class GNNEncoder(nn.Module):
     """Per-type projection to `hidden_dim`, then `num_layers` HeteroLayers (ReLU between)."""
 
     def __init__(self, metadata: tuple, in_dims: dict[str, int], num_entity_types: int,
-                 hidden_dim: int = 128, num_layers: int = 2, entity_type_dim: int = 64):
+                 hidden_dim: int = 128, num_layers: int = 2, entity_type_dim: int = 64, dropout: float = 0.0):
         super().__init__()
+        self.dropout = dropout  # after the input projection and after every layer but the last (ADR 008)
         node_types, edge_types = metadata
         self.entity_type_emb = nn.Embedding(num_entity_types, entity_type_dim)
         dims = {**in_dims, "entity_type": entity_type_dim}
@@ -93,7 +94,7 @@ class GNNEncoder(nn.Module):
         in_dims = {nt: data[nt].x.size(1) for nt in data.node_types if "x" in data[nt]}
         return cls(data.metadata(), in_dims, data["entity_type"].num_nodes,
                    hidden_dim=cfg["gnn"]["hidden_dim"], num_layers=cfg["gnn"]["num_layers"],
-                   entity_type_dim=cfg["features"]["entity_type_dim"])
+                   entity_type_dim=cfg["features"]["entity_type_dim"], dropout=cfg["gnn"].get("dropout", 0.0))
 
     def forward(self, data: HeteroData) -> dict[str, Tensor]:
         """Node vectors for every node in `data` (a full graph or a sampled subgraph)."""
@@ -105,14 +106,14 @@ class GNNEncoder(nn.Module):
                 x = self.entity_type_emb(ids.to(self.entity_type_emb.weight.device))
             else:
                 x = data[nt].x
-            x_dict[nt] = self.proj[nt](x)
+            x_dict[nt] = F.dropout(self.proj[nt](x), self.dropout, self.training)
 
         edge_index_dict = {et: data[et].edge_index for et in data.edge_types}
         edge_weight_dict = {et: data[et].edge_weight for et in data.edge_types if "edge_weight" in data[et]}
         for i, layer in enumerate(self.layers):
             x_dict = layer(x_dict, edge_index_dict, edge_weight_dict)
             if i < len(self.layers) - 1:
-                x_dict = {nt: F.relu(x) for nt, x in x_dict.items()}
+                x_dict = {nt: F.dropout(F.relu(x), self.dropout, self.training) for nt, x in x_dict.items()}
         x_dict["article"] = F.normalize(x_dict["article"], dim=-1)
         return x_dict
 

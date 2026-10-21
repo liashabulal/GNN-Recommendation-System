@@ -24,3 +24,7 @@ dist/
 
 # Local secrets
 .env
+
+# MLflow runs (local tracking)
+mlruns/
+mlartifacts/

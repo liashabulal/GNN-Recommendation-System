@@ -136,3 +136,27 @@ def test_impression_histories_order_dedup_cutoff():
 
     rows = pd.Series({"A": 0, "B": 1, "C": 2})
     assert history_tensor(h.loc[[6, 8]], rows, max_history=4).tolist() == [[0, 1, 2, -1], [-1, -1, -1, -1]]
+
+
+def test_train_step_runs_and_gradients_flow(data):
+    from recsys.training.train_gnn import ClickExamples, Recommender, _sampler, train_step
+
+    torch.manual_seed(0)
+    cfg = {**GNN_CFG, "gnn": {**GNN_CFG["gnn"], "dropout": 0.0}}
+    model = Recommender(data, cfg)
+    row = pd.Series(range(4), index=["A", "B", "C", "U"])
+    examples = pd.DataFrame({"impression_id": [1, 2], "candidates": [["A", "B", "U"], ["C", "U"]],
+                             "labels": [[1, 0, 0], [0, 1]]})
+    hist = torch.tensor([[0, 2, -1], [-1, -1, -1]])  # impression 2: empty history -> default vector
+    ex = ClickExamples(examples, row, hist)
+    assert len(ex) == 2 and ex.pos.tolist() == [0, 3]
+
+    rng = np.random.default_rng(0)
+    negs = ex.negatives(np.array([1]), k=4, rng=rng)  # only one negative available: with replacement
+    assert negs.tolist() == [[2, 2, 2, 2]]
+
+    loss = train_step(model, _sampler(data, [-1, -1]), ex, np.array([0, 1]), k=4, rng=rng)
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert model.users.default.grad is not None and model.users.default.grad.abs().sum() > 0
+    assert model.encoder.proj["article"].weight.grad.abs().sum() > 0
