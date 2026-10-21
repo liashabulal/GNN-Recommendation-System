@@ -58,6 +58,17 @@ Informative only: the ADR 009 win criterion is applied on test.
 
 Training-graph advantage on test-mix weighted AUC: -0.0004 (95% CI -0.0027 to +0.0018). The interval includes zero, so **keep the rebuilt scoring graph** (as pre-registered in ADR 008).
 
+## GNN vs embedding baseline across 3 training seeds
+
+Each seed's GNN (9 epochs, the ablation reference runs) is compared with the embedding baseline by paired bootstrap (AUC). Seed 0 is the strongest of the three runs, so its difference is the most favourable; the mean is the better estimate of what the GNN adds (ADR 009).
+
+| segment | seed 0 | mean of 3 seeds | min to max | per seed: difference [95% CI] |
+|---|---|---|---|---|
+| test-mix weighted | +0.0242 | **+0.0153** | +0.0083 to +0.0242 | seed 0: +0.0242 [+0.0165, +0.0317] · seed 1: +0.0083 [+0.0001, +0.0153] · seed 2: +0.0133 [+0.0056, +0.0209] |
+| all | +0.0222 | **+0.0129** | +0.0078 to +0.0222 | seed 0: +0.0222 [+0.0188, +0.0257] · seed 1: +0.0078 [+0.0043, +0.0112] · seed 2: +0.0086 [+0.0052, +0.0119] |
+| article=seen | +0.0373 | **+0.0325** | +0.0300 to +0.0373 | seed 0: +0.0373 [+0.0332, +0.0417] · seed 1: +0.0300 [+0.0260, +0.0342] · seed 2: +0.0302 [+0.0259, +0.0344] |
+| article=unseen | -0.0026 | **-0.0116** | -0.0224 to -0.0026 | seed 0: -0.0026 [-0.0082, +0.0027] · seed 1: -0.0224 [-0.0279, -0.0170] · seed 2: -0.0099 [-0.0152, -0.0043] |
+
 ## Findings so far
 
 - **Better text features give the largest gain.** The frozen MiniLM embedding baseline beats
@@ -67,11 +78,16 @@ Training-graph advantage on test-mix weighted AUC: -0.0004 (95% CI -0.0027 to +0
   overall and +0.024 on the test-mix weighted row, driven by **+0.037 on seen articles**,
   where co-click edges exist. Users with an empty history also gain: +0.066 from the learned
   default vector, but on only 160 impressions.
-- **On unseen articles the GNN is slightly worse than the embedding baseline.** It was −0.006
-  (95% CI excluding zero) on the first 10-epoch run and −0.003 (CI −0.008 to +0.003, including
-  zero) on the 20-epoch rerun. For articles with no co-click edges, message passing so far
-  adds nothing over their own text, and may dilute it. **Investigate with ablations A2
-  (entity edges) and A3 (subcategory nodes) before any architecture change.**
+- **On unseen articles the GNN is worse than the embedding baseline.** Across 3 training seeds
+  the difference is **−0.012 on average** (−0.022 to −0.003), and two of the three seeds'
+  intervals exclude zero. The first single-seed runs (−0.006 and −0.003) understated it. For
+  articles with no co-click edges, message passing most likely dilutes their own text signal (a hypothesis, not yet tested directly). The
+  ablations didn't find the cause: removing entity edges (A2), subcategory nodes (A3) or adding
+  a residual text connection (R1) were all within noise. This is the main open problem for
+  the next architecture iteration.
+- **The overall gain is smaller than seed 0 suggests.** Test-mix weighted: +0.024 at seed 0,
+  **+0.015 averaged over 3 seeds** (+0.008 to +0.024). Seed 1's interval only just excludes zero.
+  On seen articles the gain is robust (+0.030 to +0.037 in every seed).
 - **Rebuilding the scoring graph daily makes no measurable difference** (see Scoring graph above;
   ADR 008).
 - **Training:** early stopping picks epoch 9 (stopped at 11, patience 2). Seed-0 reruns are not

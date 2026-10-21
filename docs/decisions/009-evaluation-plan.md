@@ -18,12 +18,20 @@ is seen.
 | embedding baseline vs TF-IDF | What is better text representation worth? Frozen MiniLM vectors, user = mean of history embeddings, cosine score, no graph. |
 | GNN vs embedding baseline | What is the graph worth? Both use the same frozen text features and the same user-history rule. |
 
-**Win criterion (test, final models only).** The GNN is trained with 3 seeds. **Seed 0 is
-designated in advance** as the model we would deploy. Each seed's GNN is bootstrapped
-*separately* against the baseline (paired, 1,000 resamples), and **all three intervals are
-reported**. A model wins only if both hold:
-1. The **AUC difference has the same sign in all three seeds**.
-2. **Seed 0's 95% interval for the AUC difference excludes zero.**
+**Win criterion (test, final models only; revised before Part G).** The final GNN is trained
+with **5 seeds (0–4)**. Each seed's GNN is bootstrapped *separately* against the baseline
+(paired, 1,000 resamples). A model wins only if **every seed's 95% interval for the AUC
+difference excludes zero** (all on the same side). Report the **mean difference across seeds,
+with the minimum and maximum seed values**, next to each seed's interval.
+
+- **Why revised:** on validation, the reference GNN's AUC varied by **0.016 on the test-mix
+  weighted row** across 3 training seeds (0.651 / 0.635 / 0.640), larger than most ablation
+  effects. The bootstrap captures data noise (which impressions are sampled) only, not
+  training variance. The earlier rule relied on seed 0's interval, which would have rested
+  on a single draw from that spread; seed 0 also turned out to be the strongest of three.
+  Requiring all five intervals to exclude zero covers both sources of noise.
+- **Seed 0** remains the designated deployable model, but its number is reported alongside the
+  seed mean, minimum and maximum, not instead of them.
 
 AUC is primary. **nDCG@10 is secondary**: reported with the same bootstrap, but it can't on its
 own turn a loss into a win. **MRR and nDCG@5 are reported only.**
@@ -88,6 +96,12 @@ epoch 9. Every variant then has the same training budget, and only the component
 - **Coverage:** share of candidate articles that appear in at least one user's top 5.
 - **Diversity:** mean number of distinct subcategories in each user's top 5.
 
+**Future work: attention pooling (A8).** Attention pooling in the user encoder was within noise
+at 9 epochs (+0.002 test-mix AUC, interval including zero) and borderline positive at its own
+early-stopped length of 13 epochs (+0.005 [+0.001, +0.009], against a 13-epoch reference). It
+is the only variant that leaned positive at every training length, so it is a promising
+direction. No further runs now; revisit with longer training and several seeds.
+
 ## Alternatives considered
 
 - **Bootstrap on seed-averaged scores** (the mean of the 3 seeds' scores per candidate):
@@ -97,9 +111,11 @@ epoch 9. Every variant then has the same training budget, and only the component
   training variance.
 - **A single seed without the sign check:** ignores training variance, which is the larger
   source of noise for a neural model.
-- **Requiring all three per-seed intervals to exclude zero:** stricter than needed. Seed 0 is
-  fixed in advance, so its interval is a fair test of the deployable model, and the other two
-  seeds only need to agree in sign.
+- **Seed 0's interval plus a sign check across 3 seeds** (the original rule): replaced before
+  Part G. With a seed spread of 0.016, one seed's interval says little about the model
+  family, and a sign check doesn't bound the size of the effect. The ablation rule (seed 0
+  first, 3 seeds when borderline) is kept for validation-only decisions, where the cost of a
+  wrong call is lower.
 - **3 seeds for every ablation:** about 3× the compute for results that are usually clear-cut.
   The borderline rule spends the extra seeds only where they can change the conclusion.
 - **Judging ablations on "all":** would hide effects that only exist for a segment (e.g. A3 on

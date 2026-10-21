@@ -28,6 +28,11 @@ from recsys.training.variants import ABLATIONS, Variant
 
 SCORES_DIR = PROCESSED_DIR / "ablations"
 
+ROUND2_NOTES = """**Notes on the decisions.**
+- **A1 (co-click edges) is within noise on seen articles over 3 seeds,** although the GNN beats the embedding baseline on seen articles by +0.030 to +0.037 in every seed. So the seen-article gain does not come from co-click edges on their own; more likely it comes from what training on clicks teaches the model, with any single graph component replaceable. Not tested directly.
+- **A8 (attention pooling) is recorded as future work** (ADR 009): within noise at 9 epochs, borderline positive at 13. No further runs now.
+- **What is robust:** the graph/example split (A6) and adding training-period clicks to histories (A7)."""
+
 
 def score_model(model, variant: Variant, split, cfg) -> pd.DataFrame:
     graph, ids = variant.graph("validation_score")
@@ -223,8 +228,10 @@ def seed_variance_section(split, epochs: int) -> str:
             "than most ablation effects. **Seed 0 is the strongest of the three reference runs**, so seed-0 "
             "comparisons are made against an unusually good reference and are biased against the variants. The "
             "bootstrap interval covers impression sampling only, not training variance, so a seed-0 \"clear "
-            "effect\" smaller than about this spread (here A1 on seen articles, A3 and A4 on test-mix) may be "
-            "partly seed luck. A6 (−0.024) and A7 (−0.011 on known users, consistently negative in round 1 too) "
+            "effect\" smaller than about this spread may be partly seed luck. That is what happened to A1 "
+            "(seen articles) and A4 (test-mix): clear effects at seed 0, but positive at seeds 1 and 2, so within "
+            "noise over 3 seeds. A3's seed-0 effect on test-mix (−0.007) was not rerun and should be read the "
+            "same way. A6 (−0.024) and A7 (−0.011 on known users, consistently negative in round 1 too) "
             "are well beyond it.")
 
 
@@ -270,6 +277,7 @@ def report_round2(split, epochs: int) -> str:
         a8_note,
         seed_variance_section(split, epochs),
         "### Decisions (ADR 009 rules)\n\n| id | ablation | decision |\n|---|---|---|\n" + "\n".join(decisions),
+        ROUND2_NOTES,
     ]))
 
 

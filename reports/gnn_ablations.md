@@ -6,13 +6,13 @@ Every variant trains for exactly 9 epochs and is compared with the reference at 
 
 | id | ablation | segment | difference (seed 0) | 95% CI | verdict | 3 seeds |
 |---|---|---|---|---|---|---|
-| A1 | no co-click edges | article=seen (deciding) | -0.0052 | [-0.0074, -0.0030] | clear effect |  |
+| A1 | no co-click edges | article=seen (deciding) | -0.0052 | [-0.0074, -0.0030] | clear effect | -0.0052 / +0.0113 / +0.0053 |
 | A1 | no co-click edges | test-mix weighted | -0.0093 | [-0.0134, -0.0050] | clear effect |  |
 | A2 | no entity edges | article=unseen (deciding) | -0.0040 | [-0.0073, -0.0006] | borderline | -0.0040 / +0.0198 / +0.0052 |
 | A2 | no entity edges | test-mix weighted | -0.0031 | [-0.0074, +0.0013] | borderline |  |
 | A3 | no subcategory nodes | article=unseen (deciding) | -0.0032 | [-0.0063, -0.0001] | borderline | -0.0032 / +0.0156 / -0.0079 |
 | A3 | no subcategory nodes | test-mix weighted | -0.0066 | [-0.0107, -0.0025] | clear effect |  |
-| A4 | raw co-click edges | test-mix weighted (deciding) | -0.0085 | [-0.0125, -0.0047] | clear effect |  |
+| A4 | raw co-click edges | test-mix weighted (deciding) | -0.0085 | [-0.0125, -0.0047] | clear effect | -0.0085 / +0.0101 / +0.0072 |
 | A5 | no degree down-weighting | test-mix weighted (deciding) | -0.0041 | [-0.0073, -0.0011] | borderline | -0.0041 / +0.0089 / +0.0018 |
 | A6 | no graph/example split | test-mix weighted (deciding) | -0.0243 | [-0.0291, -0.0195] | clear effect |  |
 | A7 | no training clicks in history | user=known (deciding) | -0.0111 | [-0.0132, -0.0090] | clear effect |  |
@@ -34,26 +34,33 @@ A8 (round-1 run, best epoch 13) against the reference trained for a fixed 13 epo
 | reference seed 2 | 0.6401 | 0.6526 | 0.6604 | 0.6486 |
 | **reference mean** | **0.6421** | **0.6508** | **0.6626** | **0.6529** |
 | reference range (max − min) | 0.0159 | 0.0198 | 0.0073 | 0.0145 |
+| A1 mean of 3 seeds | 0.6424 | 0.6506 | 0.6665 | 0.6528 |
 | A2 mean of 3 seeds | 0.6454 | 0.6579 | 0.6679 | 0.6577 |
 | A3 mean of 3 seeds | 0.6439 | 0.6523 | 0.6632 | 0.6557 |
+| A4 mean of 3 seeds | 0.6450 | 0.6501 | 0.6695 | 0.6559 |
 | A5 mean of 3 seeds | 0.6443 | 0.6570 | 0.6652 | 0.6559 |
 | R1 mean of 3 seeds | 0.6447 | 0.6567 | 0.6738 | 0.6621 |
 
-The reference's spread across 3 seeds is **0.0159 AUC on the test-mix weighted row**, larger than most ablation effects. **Seed 0 is the strongest of the three reference runs**, so seed-0 comparisons are made against an unusually good reference and are biased against the variants. The bootstrap interval covers impression sampling only, not training variance, so a seed-0 "clear effect" smaller than about this spread (here A1 on seen articles, A3 and A4 on test-mix) may be partly seed luck. A6 (−0.024) and A7 (−0.011 on known users, consistently negative in round 1 too) are well beyond it.
+The reference's spread across 3 seeds is **0.0159 AUC on the test-mix weighted row**, larger than most ablation effects. **Seed 0 is the strongest of the three reference runs**, so seed-0 comparisons are made against an unusually good reference and are biased against the variants. The bootstrap interval covers impression sampling only, not training variance, so a seed-0 "clear effect" smaller than about this spread may be partly seed luck. That is what happened to A1 (seen articles) and A4 (test-mix): clear effects at seed 0, but positive at seeds 1 and 2, so within noise over 3 seeds. A3's seed-0 effect on test-mix (−0.007) was not rerun and should be read the same way. A6 (−0.024) and A7 (−0.011 on known users, consistently negative in round 1 too) are well beyond it.
 
 ### Decisions (ADR 009 rules)
 
 | id | ablation | decision |
 |---|---|---|
-| A1 | no co-click edges | clearly worse: keep current design |
+| A1 | no co-click edges | within noise: keep current design (no measurable effect) |
 | A2 | no entity edges | within noise: keep current design (no measurable effect) |
 | A3 | no subcategory nodes | within noise: keep current design (no measurable effect) |
-| A4 | raw co-click edges | clearly worse: keep current design |
+| A4 | raw co-click edges | within noise: keep current design (no measurable effect) |
 | A5 | no degree down-weighting | within noise: keep current design (no measurable effect) |
 | A6 | no graph/example split | clearly worse: keep current design |
 | A7 | no training clicks in history | clearly worse: keep current design |
 | A8 | attention pooling | within noise: keep current design (no measurable effect) |
 | R1 | residual text connection | keep current design (unseen: noise, test-mix: noise) |
+
+**Notes on the decisions.**
+- **A1 (co-click edges) is within noise on seen articles over 3 seeds,** although the GNN beats the embedding baseline on seen articles by +0.030 to +0.037 in every seed. So the seen-article gain does not come from co-click edges on their own; more likely it comes from what training on clicks teaches the model, with any single graph component replaceable. Not tested directly.
+- **A8 (attention pooling) is recorded as future work** (ADR 009): within noise at 9 epochs, borderline positive at 13. No further runs now.
+- **What is robust:** the graph/example split (A6) and adding training-period clicks to histories (A7).
 
 ## Round 1: early stopping (seed 0)
 
