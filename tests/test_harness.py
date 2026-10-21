@@ -43,6 +43,9 @@ def test_segments(split):
     assert res.loc["all", "mrr"] == pytest.approx((1 + 1 / 2) / 2)
     assert res.loc["user=known", "mrr"] == 1.0
     assert res.loc["user=new", "mrr"] == 0.5
+    # U2 has an empty history column and no training clicks; U1 clicked A in training.
+    assert res.loc["history=empty", "n_impressions"] == 1
+    assert res.loc["history=empty", "mrr"] == 0.5
 
     # Seen-only sub-lists: imp 10 -> [A(click), B]; imp 11 -> [B] has no click, so it is dropped.
     assert res.loc["article=seen", "n_impressions"] == 1

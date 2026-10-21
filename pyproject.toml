@@ -13,9 +13,11 @@ dependencies = [
     "numpy>=2.4.6",
     "pandas>=3.0.6",
     "pyarrow>=26.0.0",
+    "pyg-lib==0.7.0",
     "scikit-learn>=1.9.1",
     "scipy>=1.17.1",
     "sentence-transformers>=6.1.0",
+    "torch==2.12.*",
     "torch-geometric>=2.8.1",
 ]
 
@@ -27,3 +29,19 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
 ]
+
+# pyg-lib (PyG's compiled neighbour sampler) is published only on PyG's own wheel page,
+# built per PyTorch version; keep this URL in step with the pinned torch version.
+[[tool.uv.index]]
+name = "pyg"
+url = "https://data.pyg.org/whl/torch-2.12.0+cpu.html"
+format = "flat"
+explicit = true
+
+[tool.uv.sources]
+pyg-lib = { index = "pyg" }
+
+[tool.uv]
+# Development happens on Apple Silicon: make the resolver pick versions with macOS arm64 wheels
+# (pyg-lib 0.7.0 is the newest release with one for torch 2.12).
+required-environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]

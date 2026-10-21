@@ -7,6 +7,9 @@ column (higher = more likely to be clicked).
 Segments
     all              every target impression
     user=known/new   impressions whose user did / did not appear in the training period
+    history=empty    impressions whose user has nothing to build a profile from: an empty history
+                     column and no clicks in the training period (which precedes the target day).
+                     Matches what the GNN user encoder sees (recsys.models.history).
     article=seen/unseen
                      each impression's candidate list is restricted to articles that were /
                      were not seen in the training period, then ranked among themselves.
@@ -40,6 +43,12 @@ def candidate_table(split: EvalSplit) -> pd.DataFrame:
     cands = explode_impressions(split.target)[["impression_id", "user_id", "news_id", "clicked"]]
     cands["known_user"] = cands["user_id"].isin(split.known_users)
     cands["seen_news"] = cands["news_id"].isin(split.seen_news)
+
+    train_cands = explode_impressions(split.train)
+    clickers = set(train_cands.loc[train_cands["clicked"] == 1, "user_id"])
+    empty = split.target.set_index("impression_id")["history"].map(len).eq(0)
+    empty_imps = set(empty[empty].index) - set(split.target.loc[split.target["user_id"].isin(clickers), "impression_id"])
+    cands["empty_history"] = cands["impression_id"].isin(empty_imps)
     return cands
 
 
@@ -90,10 +99,12 @@ def segment_metrics(scores: pd.DataFrame, split: EvalSplit) -> dict[str, pd.Data
     full = per_impression_metrics(scored)
     known_imps = set(scored.loc[scored["known_user"], "impression_id"])
     is_known = full["impression_id"].isin(known_imps)
+    is_empty = full["impression_id"].isin(set(scored.loc[scored["empty_history"], "impression_id"]))
     return {
         "all": full,
         "user=known": full[is_known],
         "user=new": full[~is_known],
+        "history=empty": full[is_empty],
         "article=seen": per_impression_metrics(scored[scored["seen_news"]]),
         "article=unseen": per_impression_metrics(scored[~scored["seen_news"]]),
     }
