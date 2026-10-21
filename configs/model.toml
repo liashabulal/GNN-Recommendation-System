@@ -1,0 +1,19 @@
+# GNN recommender settings (Milestone 3). See docs/decisions/006 for the feature choices.
+
+[text_encoder]
+model = "sentence-transformers/all-MiniLM-L6-v2"   # frozen; article text = title + " " + abstract
+dim = 384
+batch_size = 256
+normalize = true        # L2-normalised embeddings (cosine-ready)
+
+[features]
+entity_vector_dim = 100  # MIND entity_embedding.vec (TransE on Wikidata)
+entity_type_dim = 64     # learnable embedding per coarse entity type
+
+[gnn]
+hidden_dim = 128
+num_layers = 2
+fanout = [10, 5]         # max sampled neighbours per edge type, layer 1 and layer 2
+
+[user]
+max_history = 50         # most recent history articles (last items of the history column)

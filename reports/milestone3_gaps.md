@@ -95,3 +95,10 @@ Source: MIND dataset introduction, `behaviors.tsv` section (https://github.com/m
 | share also shown in 9–15 Nov | 3% | 3% | 4% | 5% | 7% | 10% | 13% | 18% | 28% | 51% |
 
 The last decile is 17× the first, so the **last items are the most recent**. "50 most recent" therefore means the last 50 history items, followed by any training-period clicks made before the impression time.
+
+## Notes for later
+
+Observed while sanity-checking the article text embeddings (ADR 006):
+
+- **Near-duplicate articles need deduplication in post-processing (Milestone 4).** Several outlets cover the same story: the Kenyan Drake trade appears as at least four articles with cosine similarity 0.83–0.93. A ranked list should not show the same story several times, so collapse near-duplicates (e.g. above a cosine threshold) after scoring.
+- **Templated series match on title format, not content.** "Today in History: November 5" has its nearest neighbours in the other dates of the same column (cosine about 0.9), because the shared template dominates the short text. The embeddings link such series strongly whatever the actual content; keep this in mind when reading similarity-based neighbours or diversity metrics.
