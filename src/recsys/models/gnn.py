@@ -79,8 +79,12 @@ class GNNEncoder(nn.Module):
     """Per-type projection to `hidden_dim`, then `num_layers` HeteroLayers (ReLU between)."""
 
     def __init__(self, metadata: tuple, in_dims: dict[str, int], num_entity_types: int,
-                 hidden_dim: int = 128, num_layers: int = 2, entity_type_dim: int = 64, dropout: float = 0.0):
+                 hidden_dim: int = 128, num_layers: int = 2, entity_type_dim: int = 64, dropout: float = 0.0,
+                 residual: bool = False):
         super().__init__()
+        # residual (ablation R1): add each article's projected input text vector to its final
+        # GNN vector before L2 normalisation, so the text signal can't be diluted away.
+        self.residual = residual
         self.dropout = dropout  # after the input projection and after every layer but the last (ADR 008)
         node_types, edge_types = metadata
         self.entity_type_emb = nn.Embedding(num_entity_types, entity_type_dim)
@@ -94,7 +98,8 @@ class GNNEncoder(nn.Module):
         in_dims = {nt: data[nt].x.size(1) for nt in data.node_types if "x" in data[nt]}
         return cls(data.metadata(), in_dims, data["entity_type"].num_nodes,
                    hidden_dim=cfg["gnn"]["hidden_dim"], num_layers=cfg["gnn"]["num_layers"],
-                   entity_type_dim=cfg["features"]["entity_type_dim"], dropout=cfg["gnn"].get("dropout", 0.0))
+                   entity_type_dim=cfg["features"]["entity_type_dim"], dropout=cfg["gnn"].get("dropout", 0.0),
+                   residual=cfg["gnn"].get("residual", False))
 
     def forward(self, data: HeteroData) -> dict[str, Tensor]:
         """Node vectors for every node in `data` (a full graph or a sampled subgraph)."""
@@ -106,7 +111,9 @@ class GNNEncoder(nn.Module):
                 x = self.entity_type_emb(ids.to(self.entity_type_emb.weight.device))
             else:
                 x = data[nt].x
-            x_dict[nt] = F.dropout(self.proj[nt](x), self.dropout, self.training)
+            x_dict[nt] = self.proj[nt](x)
+        article_input = x_dict["article"]
+        x_dict = {nt: F.dropout(x, self.dropout, self.training) for nt, x in x_dict.items()}
 
         edge_index_dict = {et: data[et].edge_index for et in data.edge_types}
         edge_weight_dict = {et: data[et].edge_weight for et in data.edge_types if "edge_weight" in data[et]}
@@ -114,6 +121,8 @@ class GNNEncoder(nn.Module):
             x_dict = layer(x_dict, edge_index_dict, edge_weight_dict)
             if i < len(self.layers) - 1:
                 x_dict = {nt: F.dropout(F.relu(x), self.dropout, self.training) for nt, x in x_dict.items()}
+        if self.residual:
+            x_dict["article"] = x_dict["article"] + article_input
         x_dict["article"] = F.normalize(x_dict["article"], dim=-1)
         return x_dict
 
@@ -151,6 +160,29 @@ class UserEncoder(nn.Module):
         count = mask.sum(dim=1, keepdim=True)
         mean = vectors.sum(dim=1) / count.clamp_min(1)
         return torch.where(count > 0, mean, self.default.expand_as(mean))
+
+
+class AttentionUserEncoder(nn.Module):
+    """Attention pooling over history articles (ablation A8); learned default for empty history.
+
+    weight_i = softmax_i( q · tanh(W h_i) ), user = sum_i weight_i h_i
+    """
+
+    def __init__(self, dim: int):
+        super().__init__()
+        self.proj = nn.Linear(dim, dim)
+        self.query = nn.Parameter(torch.randn(dim) * 0.1)
+        self.default = nn.Parameter(torch.randn(dim) * 0.01)
+
+    def forward(self, article_vectors: Tensor, history: Tensor) -> Tensor:
+        mask = history >= 0
+        h = article_vectors[history.clamp_min(0)]                     # [n, L, d]
+        logits = torch.tanh(self.proj(h)) @ self.query                 # [n, L]
+        logits = logits.masked_fill(~mask, float("-inf"))
+        has_any = mask.any(dim=1, keepdim=True)
+        weights = torch.softmax(torch.where(has_any, logits, torch.zeros_like(logits)), dim=1) * mask
+        pooled = (weights.unsqueeze(-1) * h).sum(dim=1)
+        return torch.where(has_any, pooled, self.default.expand_as(pooled))
 
 
 def score(user_vectors: Tensor, candidate_vectors: Tensor) -> Tensor:

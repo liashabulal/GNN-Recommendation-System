@@ -18,10 +18,14 @@ import torch
 from recsys.data.mind import explode_impressions
 
 
-def impression_histories(behaviors: pd.DataFrame, train: pd.DataFrame, max_history: int) -> pd.Series:
-    """Most recent history (list of news IDs) per impression_id of `behaviors`."""
+def impression_histories(behaviors: pd.DataFrame, train: pd.DataFrame, max_history: int,
+                         include_clicks: bool = True) -> pd.Series:
+    """Most recent history (list of news IDs) per impression_id of `behaviors`.
+
+    include_clicks=False (ablation A7) uses the history column only.
+    """
     cands = explode_impressions(train)
-    clicks = cands[cands["clicked"] == 1].sort_values("time", kind="stable")
+    clicks = cands[(cands["clicked"] == 1) & include_clicks].sort_values("time", kind="stable")
     by_user = {u: (g["time"].tolist(), g["news_id"].tolist()) for u, g in clicks.groupby("user_id")}
 
     out = {}

@@ -33,7 +33,9 @@ from recsys.data.splits import known_user_share
 from recsys.evaluation import evaluate
 from recsys.evaluation.harness import segment_metrics
 from recsys.graph.periods import all_behaviors, load_period, period_split
-from recsys.models.gnn import GNNEncoder, UserEncoder, encode_all_articles, load_model_config, score
+from recsys.models.gnn import (AttentionUserEncoder, GNNEncoder, UserEncoder, encode_all_articles,
+                              load_model_config, score)
+from recsys.training.variants import Variant
 from recsys.models.history import history_tensor, impression_histories
 from recsys.paths import PROCESSED_DIR, PROJECT_ROOT
 
@@ -72,10 +74,12 @@ class ClickExamples:
 
 
 class Recommender(nn.Module):
-    def __init__(self, data, cfg: dict):
+    def __init__(self, data, cfg: dict, variant: Variant = Variant()):
         super().__init__()
+        cfg = {**cfg, "gnn": {**cfg["gnn"], "residual": variant.residual}}
         self.encoder = GNNEncoder.from_data(data, cfg)
-        self.users = UserEncoder(cfg["gnn"]["hidden_dim"])
+        pooling = AttentionUserEncoder if variant.user_pooling == "attention" else UserEncoder
+        self.users = pooling(cfg["gnn"]["hidden_dim"])
         self.log_scale = nn.Parameter(torch.tensor(np.log(10.0), dtype=torch.float32))  # learnable temperature
 
 
@@ -106,10 +110,10 @@ def train_step(model, loader, ex: ClickExamples, idx: np.ndarray, k: int, rng) -
 class Scorer:
     """Scores a target split with a given scoring graph (histories computed once)."""
 
-    def __init__(self, eval_split, graph, ids, max_history: int, fanout):
+    def __init__(self, eval_split, graph, ids, max_history: int, fanout, include_clicks: bool = True):
         self.split, self.graph, self.fanout = eval_split, graph, fanout
         self.row = pd.Series(np.arange(len(ids["article"])), index=ids["article"])
-        h = impression_histories(eval_split.target, eval_split.train, max_history)
+        h = impression_histories(eval_split.target, eval_split.train, max_history, include_clicks)
         self.hist = history_tensor(h, self.row, max_history)
         self.user_pos = pd.Series(np.arange(len(h)), index=h.index)
         self.pairs = explode_impressions(eval_split.target)[["impression_id", "news_id"]]
@@ -134,22 +138,28 @@ def validation_eval_split():
                                reweight_known_share=known_user_share(test.train, test.target))
 
 
-def train(setup: str, seed: int, epochs: int | None = None, cfg: dict | None = None, run_name: str | None = None):
-    """Train one model. With epochs=None: early stopping on validation (validation setup only)."""
+def train(setup: str, seed: int, epochs: int | None = None, cfg: dict | None = None, run_name: str | None = None,
+          variant: Variant = Variant()):
+    """Train one model. With epochs=None: early stopping on validation (validation setup only).
+
+    `variant` (ablations) changes the graphs, histories and model the same way for training
+    and scoring; the default is the reference model.
+    """
     cfg = cfg or load_model_config()
     tc, fanout, max_hist = cfg["train"], cfg["gnn"]["fanout"], cfg["user"]["max_history"]
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
 
     behaviors = all_behaviors()
-    data, ids = load_period(f"{setup}_train")
-    ex_split = period_split(f"{setup}_train", behaviors)  # train = graph period, target = example period
+    data, ids = variant.graph(variant.train_graph or f"{setup}_train")
+    ex_split = period_split(f"{setup}_train", behaviors)  # target = example period (12-13 / 13-14 Nov)
     row = pd.Series(np.arange(len(ids["article"])), index=ids["article"])
     clicks_source = pd.concat([ex_split.train, ex_split.target])  # clicks before t, from 9 Nov on
-    histories = history_tensor(impression_histories(ex_split.target, clicks_source, max_hist), row, max_hist)
+    histories = history_tensor(impression_histories(ex_split.target, clicks_source, max_hist, variant.history_clicks),
+                               row, max_hist)
     examples = ClickExamples(ex_split.target, row, histories)
 
-    model = Recommender(data, cfg)
+    model = Recommender(data, cfg, variant)
     opt = torch.optim.Adam(model.parameters(), lr=tc["lr"], weight_decay=tc["weight_decay"])
     loader = _sampler(data, fanout)
 
@@ -157,8 +167,8 @@ def train(setup: str, seed: int, epochs: int | None = None, cfg: dict | None = N
     if early_stop:
         assert setup == "validation", "early stopping needs the validation day"
         eval_split = validation_eval_split()
-        score_graph, score_ids = load_period("validation_score")
-        scorer = Scorer(eval_split, score_graph, score_ids, max_hist, fanout)
+        score_graph, score_ids = variant.graph("validation_score")
+        scorer = Scorer(eval_split, score_graph, score_ids, max_hist, fanout, variant.history_clicks)
 
     # Local file store (mlruns/). MLflow 3 marks it "maintenance mode" and asks for a database
     # backend, which mlflow-skinny can't provide; the documented opt-out keeps it working.
@@ -171,7 +181,7 @@ def train(setup: str, seed: int, epochs: int | None = None, cfg: dict | None = N
         mlflow.log_params({"setup": setup, "seed": seed, "git_commit": git_commit(), "examples": len(examples),
                            "fanout": str(fanout), "max_history": max_hist,
                            **{f"gnn.{k}": v for k, v in cfg["gnn"].items()},
-                           **{f"train.{k}": v for k, v in tc.items()}})
+                           **{f"train.{k}": v for k, v in tc.items()}, **variant.params()})
         best_auc, best_epoch, best_state, bad = -1.0, 0, None, 0
         for epoch in range(1, (epochs or tc["max_epochs"]) + 1):
             model.train()
@@ -207,7 +217,8 @@ def train(setup: str, seed: int, epochs: int | None = None, cfg: dict | None = N
             best_epoch, best_state = epochs, model.state_dict()
         model.load_state_dict(best_state)
         path = MODELS_DIR / f"{run.info.run_id}.pt"
-        torch.save({"state_dict": best_state, "cfg": cfg, "setup": setup, "seed": seed, "best_epoch": best_epoch}, path)
+        torch.save({"state_dict": best_state, "cfg": cfg, "setup": setup, "seed": seed, "best_epoch": best_epoch,
+                    "variant": variant}, path)
         mlflow.log_params({"best_epoch": best_epoch, "model_path": str(path.relative_to(PROJECT_ROOT))})
         if early_stop:
             mlflow.log_metric("best_val_auc_test_mix", best_auc)

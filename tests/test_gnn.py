@@ -160,3 +160,33 @@ def test_train_step_runs_and_gradients_flow(data):
     loss.backward()
     assert model.users.default.grad is not None and model.users.default.grad.abs().sum() > 0
     assert model.encoder.proj["article"].weight.grad.abs().sum() > 0
+
+
+def test_residual_and_attention_variants_run(data):
+    from recsys.models.gnn import AttentionUserEncoder
+
+    torch.manual_seed(0)
+    cfg = {"gnn": {"hidden_dim": HIDDEN, "num_layers": 2, "residual": True}, "features": {"entity_type_dim": 4}}
+    out = GNNEncoder.from_data(data, cfg).eval()(data)["article"]
+    assert torch.allclose(out.norm(dim=-1), torch.ones(4), atol=1e-6)
+
+    users = AttentionUserEncoder(HIDDEN)
+    vecs = torch.nn.functional.normalize(torch.randn(5, HIDDEN), dim=-1)
+    pooled = users(vecs, torch.tensor([[1, -1, -1], [0, 2, -1], [-1, -1, -1]]))
+    assert torch.allclose(pooled[0], vecs[1])                        # one item: weight 1
+    assert torch.allclose(pooled[2], users.default)                  # empty: default vector
+    assert torch.isfinite(pooled).all()
+
+
+def test_variant_graph_transforms():
+    from recsys.training.variants import ABLATIONS
+
+    d, _ = to_heterodata(tiny_tables(), FEATURES)
+    for ablation_id, expect_missing in (("A1", ("article", "coclicked", "article")),
+                                        ("A2", ("article", "mentions", "entity"))):
+        variant = ABLATIONS[ablation_id][0]
+        g = d.edge_type_subgraph([et for et in d.edge_types if et not in variant.drop_edge_types])
+        assert expect_missing not in g.edge_types
+    a3 = ABLATIONS["A3"][0]
+    g = d.node_type_subgraph([nt for nt in d.node_types if nt not in a3.drop_node_types])
+    assert "subcategory" not in g.node_types and all("subcategory" not in et for et in g.edge_types)

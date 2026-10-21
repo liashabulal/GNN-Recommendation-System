@@ -101,6 +101,19 @@ def build_period(name: str, behaviors=None, news=None, mentions=None, entity_typ
     return data, ids
 
 
+def build_raw_coclick(name: str) -> None:
+    """Ablation A4: the period graph with raw (unpruned) co-click edges, weight = shared users.
+
+    Reads the period's parquet tables (build the period first). Writes <name>__raw_coclick.pt.
+    """
+    tables = {p.stem: pd.read_parquet(p) for p in (GRAPH_DIR / "periods" / name).glob("*.parquet")}
+    raw = tables["edges_article_coclicked_article"]
+    tables["edges_article_coclicked_article_pruned"] = raw.assign(norm_weight=raw["weight"].astype(np.float32))
+    split = period_split(name)
+    data, ids = to_heterodata(tables, period_features(tables, split))
+    torch.save({"data": data, "ids": ids}, PYG_DIR / "periods" / f"{name}__raw_coclick.pt")
+
+
 def load_period(name: str):
     saved = torch.load(PYG_DIR / "periods" / f"{name}.pt", weights_only=False)
     return saved["data"], saved["ids"]
