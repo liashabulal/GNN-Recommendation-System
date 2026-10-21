@@ -60,6 +60,28 @@ deciding segment). Let the 95% interval be [lo, hi] with width w = hi − lo:
 | A7 | don't add training-period clicks to history | known users | only known users have such clicks |
 | A8 | attention pooling instead of mean in the user encoder | test-mix weighted | global change to every user vector |
 
+**Ablation training budget (revised after round 1).** Ablations train for a **fixed 9 epochs**
+(the reference's best epoch) with **no early stopping**, and are compared with the reference at
+epoch 9. Every variant then has the same training budget, and only the component differs.
+- **Why:** in round 1, early stopping with patience 2 ended 7 of 9 ablations at epochs 2–6.
+  At those epochs the reference itself was up to 0.019 AUC below its best, so the
+  differences mixed the component with the training length (`reports/gnn_ablations.md`,
+  round 1).
+- **Known cost:** a variant that needs longer training to converge is disadvantaged at
+  9 epochs. If a variant is within noise or borderline at 9 epochs but trained longer under
+  early stopping, it is also compared at its own epoch count, against the reference trained
+  for the same number of epochs.
+- **3 seeds:** a borderline result is rerun with seeds 1 and 2 for *both* the variant and the
+  reference (each at 9 epochs), and seed k is compared with seed k.
+
+**Decision rules for the final configuration** (applied to each ablation's deciding segment):
+- **Alternative clearly better** (interval excludes zero in its favour): adopt it.
+- **Clearly worse:** keep the current design.
+- **Within noise:** keep the current design and record "no measurable effect", unless the
+  component is costly to run (then consider removing it).
+- **R1 (residual text connection):** adopt only if it clearly helps unseen articles **and**
+  does not clearly hurt the test-mix weighted row.
+
 **Beyond-accuracy metrics** (defined and computed in Part G, on test, for final models):
 - **Freshness exposure:** share of top-5 slots given to unseen articles, compared with their
   share of clicks.
