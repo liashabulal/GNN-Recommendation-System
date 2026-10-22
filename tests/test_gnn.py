@@ -190,3 +190,33 @@ def test_variant_graph_transforms():
     a3 = ABLATIONS["A3"][0]
     g = d.node_type_subgraph([nt for nt in d.node_types if nt not in a3.drop_node_types])
     assert "subcategory" not in g.node_types and all("subcategory" not in et for et in g.edge_types)
+
+
+def test_a0_article_vector_depends_only_on_own_text(data, monkeypatch):
+    from recsys.training import variants
+    from recsys.training.variants import COMPARISONS
+
+    monkeypatch.setattr(variants, "load_period", lambda name: (data.clone(), None))
+    g, _ = COMPARISONS["A0"].graph("any")
+    assert all(g[et].edge_index.shape[1] == 0 for et in g.edge_types)
+
+    torch.manual_seed(0)
+    enc = GNNEncoder.from_data(g, GNN_CFG).eval()
+    out = enc(g)["article"]
+    assert torch.allclose(out.norm(dim=-1), torch.ones(4), atol=1e-6)
+    # Changing another article's text must not change article 0's vector.
+    g2 = g.clone()
+    g2["article"].x[1] += 5.0
+    assert torch.allclose(enc(g2)["article"][0], out[0])
+    # And sampling-based encoding still works with no edges.
+    assert encode_all_articles(enc, g, batch_size=2, fanout=[10, 5]).shape == (4, HIDDEN)
+
+
+def test_a9_appends_seen_flag(data, monkeypatch):
+    from recsys.training import variants
+    from recsys.training.variants import ABLATIONS
+
+    monkeypatch.setattr(variants, "load_period", lambda name: (data.clone(), None))
+    g, _ = ABLATIONS["A9"][0].graph("any")
+    assert g["article"].x.shape[1] == data["article"].x.shape[1] + 1
+    assert g["article"].x[:, -1].tolist() == [1.0, 1.0, 1.0, 0.0]  # U is unseen

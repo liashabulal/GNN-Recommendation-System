@@ -16,7 +16,20 @@ is seen.
 | Comparison | Question it answers |
 |---|---|
 | embedding baseline vs TF-IDF | What is better text representation worth? Frozen MiniLM vectors, user = mean of history embeddings, cosine score, no graph. |
-| GNN vs embedding baseline | What is the graph worth? Both use the same frozen text features and the same user-history rule. |
+| **GNN vs A0 (trained no-graph model)** | **What is the graph worth? Primary.** Same architecture, loss, training and user encoder; A0 has all edges removed. |
+| GNN vs embedding baseline | Secondary: graph *and* training on clicks together. Both use the same frozen text features and the same user-history rule. |
+| A0 vs embedding baseline | What is training on clicks worth, without any graph? |
+
+**Why A0 was added (before Part G).** The GNN-vs-embedding comparison is **confounded**: the GNN
+is trained on clicks, while the embedding baseline is untrained (cosine of frozen vectors). Its
+gain therefore mixes "the graph" with "training on clicks". That may explain why removing
+co-click edges (ablation A1) has no measurable effect even on seen articles, where the GNN's
+whole gain over the embedding baseline sits. A0 is the same model with all edges removed: each
+article vector comes only from its own projected text embedding (through the same
+per-node-type layers, L2-normalised), trained identically. It separates the two effects.
+**In Part G, A0 is trained on test with 5 seeds (0–4), and GNN vs A0 is the primary comparison
+for "the graph helps"**, under the same win criterion. GNN vs embedding stays as a secondary
+comparison.
 
 **Win criterion (test, final models only; revised before Part G).** The final GNN is trained
 with **5 seeds (0–4)**. Each seed's GNN is bootstrapped *separately* against the baseline

@@ -27,6 +27,8 @@ class Variant:
     history_clicks: bool = True          # append training-period clicks to histories (A7)
     user_pooling: str = "mean"           # "mean" or "attention" (A8)
     residual: bool = False               # add projected input text to final article vector (R1)
+    drop_all_edges: bool = False         # A0: keep edge types but no edges -> article vector from its own text only
+    seen_flag_input: bool = False        # A9: append the article's seen-in-the-graph-period flag to its input features
 
     def params(self) -> dict:
         return {f"variant.{k}": str(v) for k, v in asdict(self).items()}
@@ -41,10 +43,25 @@ class Variant:
             data = data.node_type_subgraph([nt for nt in data.node_types if nt not in self.drop_node_types])
         if self.drop_edge_types:
             data = data.edge_type_subgraph([et for et in data.edge_types if et not in self.drop_edge_types])
+        if self.drop_all_edges:
+            for et in data.edge_types:
+                data[et].edge_index = torch.empty(2, 0, dtype=torch.long)
+                if "edge_weight" in data[et]:
+                    data[et].edge_weight = torch.empty(0)
         if not self.degree_weight:
             del data["entity", "mentioned_in", "article"].edge_weight
+        if self.seen_flag_input:
+            # The flag is relative to this graph's own period (9-11 Nov in training, 9-13 Nov at scoring).
+            seen = data["article"].seen_in_training.float().unsqueeze(1)
+            data["article"].x = torch.cat([data["article"].x, seen], dim=1)
         return data, ids
 
+
+# Comparison models trained with the same machinery but not judged by the ablation rules.
+COMPARISONS = {
+    # A0: trained no-graph model (ADR 009): same architecture, loss, training and user encoder.
+    "A0": Variant("A0 trained no-graph model", drop_all_edges=True),
+}
 
 # ID -> (variant, deciding segments). Deciding segments from ADR 009 (R1 has two).
 ABLATIONS = {
@@ -58,4 +75,6 @@ ABLATIONS = {
     "A7": (Variant("A7 no training clicks in history", history_clicks=False), ["user=known"]),
     "A8": (Variant("A8 attention pooling", user_pooling="attention"), ["test-mix weighted"]),
     "R1": (Variant("R1 residual text connection", residual=True), ["article=unseen", "test-mix weighted"]),
+    # A9 adds an input (the flag was never one): does telling the model which articles are new help?
+    "A9": (Variant("A9 seen flag as article input", seen_flag_input=True), ["test-mix weighted"]),
 }

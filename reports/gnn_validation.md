@@ -74,17 +74,21 @@ Each seed's GNN (9 epochs, the ablation reference runs) is compared with the emb
 - **Better text features give the largest gain.** The frozen MiniLM embedding baseline beats
   TF-IDF by **+0.049 AUC** overall (95% CI 0.045 to 0.052) and +0.057 on unseen articles. That
   is more than twice the gain the graph adds on top.
-- **The graph's gain comes entirely from seen articles.** GNN versus embedding is +0.022 AUC
-  overall and +0.024 on the test-mix weighted row, driven by **+0.037 on seen articles**,
-  where co-click edges exist. Users with an empty history also gain: +0.066 from the learned
+- **The GNN's gain over the embedding baseline comes from training on clicks, not from the graph.**
+  GNN versus embedding is +0.022 AUC overall and +0.024 on the test-mix weighted row (seed 0),
+  driven by **+0.037 on seen articles**. But the trained no-graph model A0 gets the same gain
+  (A0 vs embedding: +0.015 test-mix, +0.037 seen, all 3 seeds), and **GNN vs A0 is −0.000 on
+  test-mix** (−0.007 to +0.010 across seeds, signs mixed). On validation the graph adds nothing
+  measurable (`reports/gnn_ablations.md`, round 3). Users with an empty history also gain: +0.066 from the learned
   default vector, but on only 160 impressions.
 - **On unseen articles the GNN is worse than the embedding baseline.** Across 3 training seeds
   the difference is **−0.012 on average** (−0.022 to −0.003), and two of the three seeds'
-  intervals exclude zero. The first single-seed runs (−0.006 and −0.003) understated it. For
-  articles with no co-click edges, message passing most likely dilutes their own text signal (a hypothesis, not yet tested directly). The
-  ablations didn't find the cause: removing entity edges (A2), subcategory nodes (A3) or adding
-  a residual text connection (R1) were all within noise. This is the main open problem for
-  the next architecture iteration.
+  intervals exclude zero. The first single-seed runs (−0.006 and −0.003) understated it.
+  **Cause (corrected after ablation A0):** it is *not* message passing. The trained no-graph model
+  A0, which has no message passing, shows the same deficit against the embedding baseline
+  (−0.013 on unseen articles, all 3 seeds below zero). Training on clicks shifts the ranking
+  towards the kinds of articles clicked during training, at the expense of new ones. An earlier
+  version of this section blamed message passing; the A0 result rules that out.
 - **The overall gain is smaller than seed 0 suggests.** Test-mix weighted: +0.024 at seed 0,
   **+0.015 averaged over 3 seeds** (+0.008 to +0.024). Seed 1's interval only just excludes zero.
   On seen articles the gain is robust (+0.030 to +0.037 in every seed).

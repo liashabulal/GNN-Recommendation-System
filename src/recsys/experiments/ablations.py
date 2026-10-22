@@ -24,9 +24,15 @@ from recsys.evaluation import evaluate, paired_bootstrap
 from recsys.models.gnn import load_model_config
 from recsys.paths import PROCESSED_DIR, REPORTS_DIR
 from recsys.training.train_gnn import MODELS_DIR, Recommender, Scorer, train, validation_eval_split
-from recsys.training.variants import ABLATIONS, Variant
+from recsys.training.variants import ABLATIONS, COMPARISONS, Variant
 
 SCORES_DIR = PROCESSED_DIR / "ablations"
+
+ROUND3_NOTES = """**What A0 shows.**
+- **The graph adds nothing measurable on validation.** GNN − A0 is −0.000 on the test-mix weighted row on average, with seed 0 favouring the graph (+0.010) and seeds 1–2 favouring A0 (−0.004, −0.007). Only seed 0 showed a graph advantage, and seed 0 was already known to be the strongest reference run.
+- **All of the GNN's gain over the embedding baseline comes from training on clicks.** A0 − embedding is +0.015 test-mix, +0.037 on seen articles, all 3 seeds clear of zero. This explains A1: removing co-click edges can't matter when the edges as a whole don't.
+- **The unseen-article deficit also comes from training on clicks,** not from message passing: A0 − embedding is −0.013 on unseen articles (all 3 seeds below zero).
+- **Implication for Part G:** with GNN vs A0 as the primary comparison and the 5-seed criterion, the expected test outcome is *no measurable graph effect*."""
 
 ROUND2_NOTES = """**Notes on the decisions.**
 - **A1 (co-click edges) is within noise on seen articles over 3 seeds,** although the GNN beats the embedding baseline on seen articles by +0.030 to +0.037 in every seed. So the seen-article gain does not come from co-click edges on their own; more likely it comes from what training on clicks teaches the model, with any single graph component replaceable. Not tested directly.
@@ -61,7 +67,8 @@ def key(ablation_id: str, seed: int, epochs: int | None) -> str:
 
 
 def run_ablation(ablation_id: str, seed: int, epochs: int | None = None) -> None:
-    variant = Variant() if ablation_id == "REF" else ABLATIONS[ablation_id][0]
+    variant = (Variant() if ablation_id == "REF" else COMPARISONS[ablation_id] if ablation_id in COMPARISONS
+               else ABLATIONS[ablation_id][0])
     cfg = load_model_config()
     model, best_epoch, run_id = train("validation", seed, epochs=epochs, cfg=cfg, variant=variant,
                                       run_name=f"ablation-{key(ablation_id, seed, epochs)}")
@@ -153,8 +160,9 @@ def report() -> None:
         "All segments and nDCG@10 for round 1: `reports/gnn_ablations.csv`.",
     ])
     round2 = report_round2(split, epochs=9)
+    round3 = report_round3(split)
     (REPORTS_DIR / "gnn_ablations.md").write_text(
-        "# GNN ablations (validation, 14 Nov)\n\n" + round2 + "\n\n" + round1 + "\n")
+        "# GNN ablations (validation, 14 Nov)\n\n" + (round3 + "\n\n" if round3 else "") + round2 + "\n\n" + round1 + "\n")
     print(open(REPORTS_DIR / "gnn_ablations.md").read())
 
 
@@ -235,10 +243,69 @@ def seed_variance_section(split, epochs: int) -> str:
             "are well beyond it.")
 
 
+ALL_SEGMENTS = ["all", "test-mix weighted", "user=known", "user=new", "history=empty", "article=seen", "article=unseen"]
+
+
+def _seed_table(pairs: list, split, label_a: str, label_b: str) -> str:
+    """Per-seed paired bootstraps (AUC) for (a, b) score pairs; one row per segment."""
+    boots = [paired_bootstrap(a, b, split, metrics=("auc",)).set_index("segment") for a, b in pairs]
+    rows = []
+    for seg in ALL_SEGMENTS:
+        d = [b.loc[seg, "diff"] for b in boots]
+        excl = [(b.loc[seg, "ci_low"] > 0 or b.loc[seg, "ci_high"] < 0) for b in boots]
+        same_side = all(x > 0 for x in d) or all(x < 0 for x in d)
+        per_seed = " · ".join(f"{b.loc[seg, 'diff']:+.4f} [{b.loc[seg, 'ci_low']:+.4f}, {b.loc[seg, 'ci_high']:+.4f}]"
+                              for b in boots)
+        rows.append(f"| {seg} | **{sum(d) / len(d):+.4f}** | {min(d):+.4f} to {max(d):+.4f} | "
+                    f"{sum(excl)}/{len(d)}{' (same side)' if same_side and all(excl) else ''} | {per_seed} |")
+    return (f"**{label_a} − {label_b}** (AUC; per seed k: model seed k vs model seed k)\n\n"
+            "| segment | mean | min to max | seeds whose CI excludes 0 | per seed: difference [95% CI] |\n"
+            "|---|---|---|---|---|\n" + "\n".join(rows))
+
+
+def report_round3(split) -> str:
+    """A0 (trained no-graph model) comparisons, and A9."""
+    from recsys.experiments.run_baselines import load_catalogue
+    from recsys.models.baselines import EmbeddingContent
+
+    a0 = [_load(key("A0", s, 9)) for s in (0, 1, 2)]
+    if any(x is None for x in a0):
+        return ""
+    gnn = [_reference(s, 9) for s in (0, 1, 2)]
+    emb = EmbeddingContent(load_model_config()["user"]["max_history"]).fit(split.train, load_catalogue()).score(split.target)
+    parts = [
+        "## Round 3: trained no-graph model (A0) and seen flag (A9)",
+        "**A0** has the GNN's architecture, loss, training (fixed 9 epochs) and user encoder, but every edge "
+        "type is empty, so each article vector comes only from its own projected text embedding (through the same "
+        "per-node-type layers, L2-normalised). It separates *the graph* from *training on clicks* (ADR 009).",
+        _seed_table(list(zip(gnn, a0)), split, "GNN", "A0") + "\n\n*Value of the graph* (primary comparison in Part G).",
+        _seed_table([(a, emb) for a in a0], split, "A0", "embedding baseline")
+        + "\n\n*Value of training on clicks, without a graph.*",
+        ROUND3_NOTES,
+    ]
+    a9 = _load(key("A9", 0, 9))
+    if a9 is not None:
+        r = _compare(a9, gnn[0], split, ["test-mix weighted", "article=seen", "article=unseen"])
+        lines = [f"| {seg}{' (deciding)' if seg == 'test-mix weighted' else ''} | {x['diff']:+.4f} | "
+                 f"[{x['ci_low']:+.4f}, {x['ci_high']:+.4f}] | {classify(x['ci_low'], x['ci_high'])} |"
+                 for seg, x in r.items()]
+        three = [(_load(key("A9", s, 9)), _reference(s, 9)) for s in (1, 2)]
+        extra = ""
+        if all(x is not None for x, _ in three):
+            extra = "\n\n" + _seed_table([(a9, gnn[0])] + three, split, "A9", "reference")
+        parts.append("**A9: seen flag as an article input** (seed 0, fixed 9 epochs, vs the reference). The "
+                     "flag was never a model input (the encoder reads only node features), so A9 *adds* it: "
+                     "each article's features get a 0/1 seen-in-the-graph-period flag.\n\n"
+                     "| segment | difference | 95% CI | verdict |\n|---|---|---|---|\n" + "\n".join(lines) + extra)
+    return "\n\n".join(parts)
+
+
 def report_round2(split, epochs: int) -> str:
     ref = _reference(0, epochs)
     rows, decisions = [], []
     for aid, (variant, deciding) in ABLATIONS.items():
+        if aid == "A9":
+            continue
         a = _load(key(aid, 0, epochs))
         if a is None:
             continue
