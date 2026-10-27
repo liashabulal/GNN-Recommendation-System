@@ -1,0 +1,4 @@
+,mean,min,max,seeds excluding 0,outcome
+GNN vs A0 (primary),0.005274264116115948,-0.000986599347833343,0.012564501586314216,4,no win (not every seed's interval excludes zero on the same side)
+GNN vs embedding,0.02672104627277062,0.017025297531804005,0.03414374988659929,5,win for the first model
+A0 vs embedding,0.021446782156654666,0.018011896879637345,0.026019248775794895,5,win for the first model

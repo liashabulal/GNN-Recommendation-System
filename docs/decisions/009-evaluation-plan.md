@@ -36,6 +36,8 @@ with **5 seeds (0–4)**. Each seed's GNN is bootstrapped *separately* against t
 (paired, 1,000 resamples). A model wins only if **every seed's 95% interval for the AUC
 difference excludes zero** (all on the same side). Report the **mean difference across seeds,
 with the minimum and maximum seed values**, next to each seed's interval.
+The win test on test uses **all impressions**, because the test-mix weighted row was defined only
+as a validation stand-in for the test population.
 
 - **Why revised:** on validation, the reference GNN's AUC varied by **0.016 on the test-mix
   weighted row** across 3 training seeds (0.651 / 0.635 / 0.640), larger than most ablation
