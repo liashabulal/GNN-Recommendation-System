@@ -9,7 +9,9 @@ Everything that depends on the graph period is recomputed from it: seen/unseen f
 co-click edges and pruning (ADR 004), entity degree weights, and subcategory/category means
 over articles that exist before the target period (ADR 006).
 
-Run `uv run python -m recsys.graph.periods [name ...]` to build the named periods below.
+Run `uv run python -m recsys.graph.periods [name ...]` to build the named periods below, and
+`uv run python -m recsys.graph.periods raw-coclick [name ...]` to build the raw co-click variants
+used by ablation A4 (default: the two validation periods; build the periods first).
 Outputs: parquet tables in data/processed/graph/periods/<name>/ (source of truth) and
 the HeteroData in data/processed/pyg/periods/<name>.pt.
 """
@@ -119,7 +121,23 @@ def load_period(name: str):
     return saved["data"], saved["ids"]
 
 
-def main(names: list[str]) -> None:
+RAW_COCLICK_DEFAULT = ("validation_train", "validation_score")  # the periods ablation A4 trains and scores on
+
+
+def main(args: list[str]) -> None:
+    if args and args[0] == "raw-coclick":
+        names = args[1:] or list(RAW_COCLICK_DEFAULT)
+        unknown = [n for n in names if n not in PERIODS]
+        if unknown:
+            raise SystemExit(f"unknown period(s): {', '.join(unknown)}; expected one of {', '.join(PERIODS)}")
+        for name in names:
+            build_raw_coclick(name)
+            print(f"{name}: raw co-click graph written")
+        return
+    build_periods(args)
+
+
+def build_periods(names: list[str]) -> None:
     behaviors = all_behaviors()
     news = pd.concat([load_news("train"), load_news("dev")]).drop_duplicates("news_id")
     mentions = pd.concat([load_entity_mentions("train"), load_entity_mentions("dev")])
